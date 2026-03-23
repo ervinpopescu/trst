@@ -529,6 +529,20 @@ impl App {
                 self.adjust_file_priority(false).await;
             }
 
+            // toggle wanted/unwanted
+            KeyCode::Char('x') => {
+                self.toggle_file_wanted().await;
+            }
+
+            // reannounce from file view
+            KeyCode::Char('t') => {
+                if let Some(t) = &self.detail_torrent
+                    && let Err(e) = self.client.reannounce(&[t.id]).await
+                {
+                    self.last_error = Some(e);
+                }
+            }
+
             _ => {}
         }
     }
@@ -562,6 +576,39 @@ impl App {
         self.refresh_detail().await;
     }
 
+    async fn toggle_file_wanted(&mut self) {
+        let Some(torrent) = &self.detail_torrent else {
+            return;
+        };
+        let tid = torrent.id;
+        let indices = self.file_target_indices();
+        let changes: Vec<(usize, FilePriority)> = indices
+            .iter()
+            .filter_map(|&i| {
+                torrent.file_stats.get(i).map(|stats| {
+                    let current = FilePriority::from_stats(stats);
+                    let toggled = if current == FilePriority::Unwanted {
+                        FilePriority::Normal
+                    } else {
+                        FilePriority::Unwanted
+                    };
+                    (i, toggled)
+                })
+            })
+            .collect();
+
+        if changes.is_empty() {
+            return;
+        }
+
+        if let Err(e) = self.client.set_file_priorities(tid, &changes).await {
+            self.last_error = Some(e);
+            return;
+        }
+        self.file_selected.clear();
+        self.refresh_detail().await;
+    }
+
     async fn handle_details_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => self.view = View::TorrentList,
@@ -573,6 +620,13 @@ impl App {
                 self.file_cursor = 0;
                 self.file_selected.clear();
                 self.view = View::Files;
+            }
+            KeyCode::Char('t') => {
+                if let Some(t) = &self.detail_torrent
+                    && let Err(e) = self.client.reannounce(&[t.id]).await
+                {
+                    self.last_error = Some(e);
+                }
             }
             _ => {}
         }

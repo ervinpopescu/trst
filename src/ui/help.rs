@@ -38,6 +38,8 @@ pub fn draw(f: &mut Frame, _app: &App, area: Rect) {
                 ("Space", "Toggle select"),
                 ("+/l", "Increase priority"),
                 ("-/h", "Decrease priority"),
+                ("x", "Toggle download (wanted/skip)"),
+                ("t", "Reannounce"),
                 ("q/Esc", "Back to list"),
             ],
         ),
@@ -45,6 +47,7 @@ pub fn draw(f: &mut Frame, _app: &App, area: Rect) {
             "Details",
             vec![
                 ("Enter", "Open files"),
+                ("t", "Reannounce"),
                 ("q/Esc", "Back to list"),
             ],
         ),

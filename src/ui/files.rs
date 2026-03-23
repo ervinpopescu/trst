@@ -80,7 +80,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         Constraint::Length(22),
     ];
 
-    let title = format!(" {} — files ({}) [+/- priority, q back] ", torrent.name, torrent.files.len());
+    let title = format!(" {} — files ({}) [+/- priority, x toggle, q back] ", torrent.name, torrent.files.len());
     let table = Table::new(rows, widths)
         .header(header)
         .block(Block::default().title(title).borders(Borders::ALL));
