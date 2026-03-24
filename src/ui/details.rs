@@ -1,27 +1,31 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use crate::app::App;
+use crate::config::parse_color;
 use crate::util;
 
 pub fn draw(f: &mut Frame, app: &App, area: Rect) {
+    let th = &app.theme;
     let Some(t) = &app.detail_torrent else {
         return;
     };
 
+    let label_color = parse_color(&th.detail_label);
+
     let mut lines = vec![
-        detail_line("Name", &t.name),
-        detail_line("Hash", &t.hash_string),
-        detail_line("Status", t.status_str()),
-        detail_line("Location", &t.download_dir),
+        detail_line("Name", &t.name, label_color),
+        detail_line("Hash", &t.hash_string, label_color),
+        detail_line("Status", t.status_str(), label_color),
+        detail_line("Location", &t.download_dir, label_color),
         Line::raw(""),
-        detail_line("Size", &util::human_bytes(t.total_size)),
-        detail_line("Downloaded", &util::human_bytes(t.downloaded_ever)),
-        detail_line("Uploaded", &util::human_bytes(t.uploaded_ever)),
-        detail_line("Ratio", &format!("{:.2}", t.upload_ratio)),
+        detail_line("Size", &util::human_bytes(t.total_size), label_color),
+        detail_line("Downloaded", &util::human_bytes(t.downloaded_ever), label_color),
+        detail_line("Uploaded", &util::human_bytes(t.uploaded_ever), label_color),
+        detail_line("Ratio", &format!("{:.2}", t.upload_ratio), label_color),
         detail_line(
             "Progress",
             &format!(
@@ -29,34 +33,37 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
                 util::progress_bar(t.percent_done, 20),
                 util::percent(t.percent_done)
             ),
+            label_color,
         ),
         Line::raw(""),
-        detail_line("Down speed", &util::human_speed(t.rate_download)),
-        detail_line("Up speed", &util::human_speed(t.rate_upload)),
-        detail_line("ETA", &util::human_eta(t.eta)),
+        detail_line("Down speed", &util::human_speed(t.rate_download), label_color),
+        detail_line("Up speed", &util::human_speed(t.rate_upload), label_color),
+        detail_line("ETA", &util::human_eta(t.eta), label_color),
         detail_line(
             "Peers",
             &format!(
                 "{} connected, {} sending, {} receiving",
                 t.peers_connected, t.peers_sending_to_us, t.peers_getting_from_us
             ),
+            label_color,
         ),
         Line::raw(""),
-        detail_line("Added", &format_timestamp(t.added_date)),
-        detail_line("Completed", &format_timestamp(t.done_date)),
-        detail_line("Queue", &t.queue_position.to_string()),
-        detail_line("Files", &t.files.len().to_string()),
+        detail_line("Added", &format_timestamp(t.added_date), label_color),
+        detail_line("Completed", &format_timestamp(t.done_date), label_color),
+        detail_line("Queue", &t.queue_position.to_string(), label_color),
+        detail_line("Files", &t.files.len().to_string(), label_color),
         Line::raw(""),
-        detail_line("Trackers", &format_trackers(t)),
+        detail_line("Trackers", &format_trackers(t), label_color),
         Line::raw(""),
         detail_line(
             "Comment",
             if t.comment.is_empty() { "—" } else { &t.comment },
+            label_color,
         ),
     ];
 
     if t.error != 0 {
-        lines.push(detail_line("Error", &t.error_string));
+        lines.push(detail_line("Error", &t.error_string, label_color));
     }
 
     let title = format!(" {} [enter -> files, q back] ", t.name);
@@ -67,12 +74,12 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(paragraph, area);
 }
 
-fn detail_line(label: &str, value: &str) -> Line<'static> {
+fn detail_line(label: &str, value: &str, label_color: ratatui::style::Color) -> Line<'static> {
     Line::from(vec![
         Span::styled(
             format!("  {label:<14} "),
             Style::default()
-                .fg(Color::Yellow)
+                .fg(label_color)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(value.to_string()),

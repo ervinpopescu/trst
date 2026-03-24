@@ -1,11 +1,12 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent};
 use ratatui::DefaultTerminal;
 use tokio::time;
 
 use crate::client::TransmissionClient;
+use crate::config::{Bindings, Config, ThemeConfig};
 use crate::protocol::*;
 use crate::ui;
 
@@ -68,6 +69,8 @@ impl SortColumn {
 
 pub struct App {
     pub client: TransmissionClient,
+    pub bindings: Bindings,
+    pub theme: ThemeConfig,
     pub view: View,
     pub prev_view: View,
     pub running: bool,
@@ -103,9 +106,12 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(client: TransmissionClient) -> Self {
+    pub fn new(client: TransmissionClient, config: Config) -> Self {
+        let bindings = Bindings::from_config(&config.keys);
         Self {
             client,
+            bindings,
+            theme: config.theme,
             view: View::TorrentList,
             prev_view: View::TorrentList,
             running: true,
@@ -243,6 +249,30 @@ impl App {
         });
     }
 
+    fn move_down(&mut self, cursor: &mut usize, selected: &mut BTreeSet<usize>, limit: usize, key: &KeyEvent) {
+        if self.bindings.select_down.matches(key.code, key.modifiers) {
+            selected.insert(*cursor);
+            if *cursor + 1 < limit {
+                *cursor += 1;
+                selected.insert(*cursor);
+            }
+        } else if *cursor + 1 < limit {
+            *cursor += 1;
+        }
+    }
+
+    fn move_up(&mut self, cursor: &mut usize, selected: &mut BTreeSet<usize>, key: &KeyEvent) {
+        if self.bindings.select_up.matches(key.code, key.modifiers) {
+            selected.insert(*cursor);
+            if *cursor > 0 {
+                *cursor -= 1;
+                selected.insert(*cursor);
+            }
+        } else if *cursor > 0 {
+            *cursor -= 1;
+        }
+    }
+
     async fn handle_torrent_list_key(&mut self, key: KeyEvent) {
         if self.adding {
             self.handle_add_input(key).await;
@@ -269,160 +299,127 @@ impl App {
         }
 
         let visible_len = self.filtered_torrents().len();
+        let (code, mods) = (key.code, key.modifiers);
+        let b = &self.bindings;
 
-        match key.code {
-            KeyCode::Char('q') => self.running = false,
-            KeyCode::Char('?') => {
-                self.prev_view = self.view;
-                self.view = View::Help;
+        if b.quit.matches(code, mods) {
+            self.running = false;
+        } else if b.help.matches(code, mods) {
+            self.prev_view = self.view;
+            self.view = View::Help;
+        } else if b.down.matches(code, mods) || b.select_down.matches(code, mods) {
+            let mut cursor = self.cursor;
+            let mut selected = self.selected.clone();
+            self.move_down(&mut cursor, &mut selected, visible_len, &key);
+            self.cursor = cursor;
+            self.selected = selected;
+        } else if b.up.matches(code, mods) || b.select_up.matches(code, mods) {
+            let mut cursor = self.cursor;
+            let mut selected = self.selected.clone();
+            self.move_up(&mut cursor, &mut selected, &key);
+            self.cursor = cursor;
+            self.selected = selected;
+        } else if b.top.matches(code, mods) {
+            self.cursor = 0;
+        } else if b.bottom.matches(code, mods) {
+            if visible_len > 0 {
+                self.cursor = visible_len - 1;
             }
-
-            // navigation
-            KeyCode::Char('j') | KeyCode::Down => {
-                if key.modifiers.contains(KeyModifiers::SHIFT) {
-                    self.selected.insert(self.cursor);
-                    if self.cursor + 1 < visible_len {
-                        self.cursor += 1;
-                        self.selected.insert(self.cursor);
+        } else if b.select_toggle.matches(code, mods) {
+            if self.selected.contains(&self.cursor) {
+                self.selected.remove(&self.cursor);
+            } else {
+                self.selected.insert(self.cursor);
+            }
+        } else if b.enter.matches(code, mods) {
+            let visible = self.filtered_torrents();
+            if let Some(&torrent) = visible.get(self.cursor) {
+                let tid = torrent.id;
+                match self.client.get_torrent(tid, TORRENT_DETAIL_FIELDS).await {
+                    Ok(Some(t)) => {
+                        self.detail_torrent = Some(t);
+                        self.file_cursor = 0;
+                        self.file_selected.clear();
+                        self.view = View::Files;
                     }
-                } else if self.cursor + 1 < visible_len {
-                    self.cursor += 1;
+                    Ok(None) => self.last_error = Some("torrent not found".into()),
+                    Err(e) => self.last_error = Some(e),
                 }
             }
-            KeyCode::Char('k') | KeyCode::Up => {
-                if key.modifiers.contains(KeyModifiers::SHIFT) {
-                    self.selected.insert(self.cursor);
-                    if self.cursor > 0 {
-                        self.cursor -= 1;
-                        self.selected.insert(self.cursor);
+        } else if b.details.matches(code, mods) {
+            let visible = self.filtered_torrents();
+            if let Some(&torrent) = visible.get(self.cursor) {
+                let tid = torrent.id;
+                match self.client.get_torrent(tid, TORRENT_DETAIL_FIELDS).await {
+                    Ok(Some(t)) => {
+                        self.detail_torrent = Some(t);
+                        self.view = View::Details;
                     }
-                } else if self.cursor > 0 {
-                    self.cursor -= 1;
+                    Ok(None) => self.last_error = Some("torrent not found".into()),
+                    Err(e) => self.last_error = Some(e),
                 }
             }
-            KeyCode::Char('g') => self.cursor = 0,
-            KeyCode::Char('G') => {
-                if visible_len > 0 {
-                    self.cursor = visible_len - 1;
-                }
-            }
-            KeyCode::Char(' ') => {
-                if self.selected.contains(&self.cursor) {
-                    self.selected.remove(&self.cursor);
+        } else if b.pause.matches(code, mods) {
+            let ids = self.target_ids();
+            if !ids.is_empty() {
+                let visible = self.filtered_torrents();
+                let any_stopped = self
+                    .selected
+                    .iter()
+                    .filter_map(|&i| visible.get(i))
+                    .any(|t| t.is_stopped())
+                    || (self.selected.is_empty()
+                        && visible.get(self.cursor).is_some_and(|t| t.is_stopped()));
+                let result = if any_stopped {
+                    self.client.start(&ids).await
                 } else {
-                    self.selected.insert(self.cursor);
-                }
-            }
-
-            // enter file view
-            KeyCode::Enter => {
-                let visible = self.filtered_torrents();
-                if let Some(&torrent) = visible.get(self.cursor) {
-                    let tid = torrent.id;
-                    match self.client.get_torrent(tid, TORRENT_DETAIL_FIELDS).await {
-                        Ok(Some(t)) => {
-                            self.detail_torrent = Some(t);
-                            self.file_cursor = 0;
-                            self.file_selected.clear();
-                            self.view = View::Files;
-                        }
-                        Ok(None) => self.last_error = Some("torrent not found".into()),
-                        Err(e) => self.last_error = Some(e),
-                    }
-                }
-            }
-
-            // details view
-            KeyCode::Tab => {
-                let visible = self.filtered_torrents();
-                if let Some(&torrent) = visible.get(self.cursor) {
-                    let tid = torrent.id;
-                    match self.client.get_torrent(tid, TORRENT_DETAIL_FIELDS).await {
-                        Ok(Some(t)) => {
-                            self.detail_torrent = Some(t);
-                            self.view = View::Details;
-                        }
-                        Ok(None) => self.last_error = Some("torrent not found".into()),
-                        Err(e) => self.last_error = Some(e),
-                    }
-                }
-            }
-
-            // actions
-            KeyCode::Char('p') => {
-                let ids = self.target_ids();
-                if !ids.is_empty() {
-                    let visible = self.filtered_torrents();
-                    let any_stopped = self
-                        .selected
-                        .iter()
-                        .filter_map(|&i| visible.get(i))
-                        .any(|t| t.is_stopped())
-                        || (self.selected.is_empty()
-                            && visible.get(self.cursor).is_some_and(|t| t.is_stopped()));
-
-                    let result = if any_stopped {
-                        self.client.start(&ids).await
-                    } else {
-                        self.client.stop(&ids).await
-                    };
-                    if let Err(e) = result {
-                        self.last_error = Some(e);
-                    }
-                    self.selected.clear();
-                }
-            }
-            KeyCode::Char('d') => {
-                if !self.target_ids().is_empty() {
-                    self.confirm = Some(Confirm::Remove);
-                }
-            }
-            KeyCode::Char('D') => {
-                if !self.target_ids().is_empty() {
-                    self.confirm = Some(Confirm::DeleteFiles);
-                }
-            }
-            KeyCode::Char('a') => {
-                self.adding = true;
-                self.add_input.clear();
-            }
-            KeyCode::Char('t') => {
-                let ids = self.target_ids();
-                if let Err(e) = self.client.reannounce(&ids).await {
+                    self.client.stop(&ids).await
+                };
+                if let Err(e) = result {
                     self.last_error = Some(e);
                 }
                 self.selected.clear();
             }
-            KeyCode::Char('c') => {
-                let ids = self.target_ids();
-                if let Err(e) = self.client.verify(&ids).await {
-                    self.last_error = Some(e);
-                }
-                self.selected.clear();
+        } else if b.remove.matches(code, mods) {
+            if !self.target_ids().is_empty() {
+                self.confirm = Some(Confirm::Remove);
             }
-            KeyCode::Char('K') => {
-                let ids = self.target_ids();
-                if let Err(e) = self.client.queue_move("queue-move-up", &ids).await {
-                    self.last_error = Some(e);
-                }
+        } else if b.delete.matches(code, mods) {
+            if !self.target_ids().is_empty() {
+                self.confirm = Some(Confirm::DeleteFiles);
             }
-            KeyCode::Char('J') => {
-                let ids = self.target_ids();
-                if let Err(e) = self.client.queue_move("queue-move-down", &ids).await {
-                    self.last_error = Some(e);
-                }
+        } else if b.add.matches(code, mods) {
+            self.adding = true;
+            self.add_input.clear();
+        } else if b.reannounce.matches(code, mods) {
+            let ids = self.target_ids();
+            if let Err(e) = self.client.reannounce(&ids).await {
+                self.last_error = Some(e);
             }
-            KeyCode::Char('/') => {
-                self.filter_active = true;
-                self.filter_input.clear();
+            self.selected.clear();
+        } else if b.verify.matches(code, mods) {
+            let ids = self.target_ids();
+            if let Err(e) = self.client.verify(&ids).await {
+                self.last_error = Some(e);
             }
-            KeyCode::Char('s') => {
-                self.sort_column = self.sort_column.next();
+            self.selected.clear();
+        } else if b.queue_up.matches(code, mods) {
+            let ids = self.target_ids();
+            if let Err(e) = self.client.queue_move("queue-move-up", &ids).await {
+                self.last_error = Some(e);
             }
-            KeyCode::Char('S') => {
-                self.sort_ascending = !self.sort_ascending;
+        } else if b.queue_down.matches(code, mods) {
+            let ids = self.target_ids();
+            if let Err(e) = self.client.queue_move("queue-move-down", &ids).await {
+                self.last_error = Some(e);
             }
-            _ => {}
+        } else if b.filter.matches(code, mods) {
+            self.filter_active = true;
+            self.filter_input.clear();
+        } else if b.sort.matches(code, mods) {
+            self.sort_column = self.sort_column.next();
+        } else if b.sort_reverse.matches(code, mods) {
+            self.sort_ascending = !self.sort_ascending;
         }
     }
 
@@ -474,76 +471,50 @@ impl App {
             .map(|t| t.files.len())
             .unwrap_or(0);
 
-        match key.code {
-            KeyCode::Esc | KeyCode::Char('q') => {
-                self.view = View::TorrentList;
-                self.file_selected.clear();
-            }
-            KeyCode::Char('?') => {
-                self.prev_view = self.view;
-                self.view = View::Help;
-            }
+        let (code, mods) = (key.code, key.modifiers);
+        let b = &self.bindings;
 
-            // navigation
-            KeyCode::Char('j') | KeyCode::Down => {
-                if key.modifiers.contains(KeyModifiers::SHIFT) {
-                    self.file_selected.insert(self.file_cursor);
-                    if self.file_cursor + 1 < file_count {
-                        self.file_cursor += 1;
-                        self.file_selected.insert(self.file_cursor);
-                    }
-                } else if self.file_cursor + 1 < file_count {
-                    self.file_cursor += 1;
-                }
+        if b.back.matches(code, mods) || b.quit.matches(code, mods) {
+            self.view = View::TorrentList;
+            self.file_selected.clear();
+        } else if b.help.matches(code, mods) {
+            self.prev_view = self.view;
+            self.view = View::Help;
+        } else if b.down.matches(code, mods) || b.select_down.matches(code, mods) {
+            let mut cursor = self.file_cursor;
+            let mut selected = self.file_selected.clone();
+            self.move_down(&mut cursor, &mut selected, file_count, &key);
+            self.file_cursor = cursor;
+            self.file_selected = selected;
+        } else if b.up.matches(code, mods) || b.select_up.matches(code, mods) {
+            let mut cursor = self.file_cursor;
+            let mut selected = self.file_selected.clone();
+            self.move_up(&mut cursor, &mut selected, &key);
+            self.file_cursor = cursor;
+            self.file_selected = selected;
+        } else if b.top.matches(code, mods) {
+            self.file_cursor = 0;
+        } else if b.bottom.matches(code, mods) {
+            if file_count > 0 {
+                self.file_cursor = file_count - 1;
             }
-            KeyCode::Char('k') | KeyCode::Up => {
-                if key.modifiers.contains(KeyModifiers::SHIFT) {
-                    self.file_selected.insert(self.file_cursor);
-                    if self.file_cursor > 0 {
-                        self.file_cursor -= 1;
-                        self.file_selected.insert(self.file_cursor);
-                    }
-                } else if self.file_cursor > 0 {
-                    self.file_cursor -= 1;
-                }
+        } else if b.select_toggle.matches(code, mods) {
+            if self.file_selected.contains(&self.file_cursor) {
+                self.file_selected.remove(&self.file_cursor);
+            } else {
+                self.file_selected.insert(self.file_cursor);
             }
-            KeyCode::Char('g') => self.file_cursor = 0,
-            KeyCode::Char('G') => {
-                if file_count > 0 {
-                    self.file_cursor = file_count - 1;
-                }
-            }
-            KeyCode::Char(' ') => {
-                if self.file_selected.contains(&self.file_cursor) {
-                    self.file_selected.remove(&self.file_cursor);
-                } else {
-                    self.file_selected.insert(self.file_cursor);
-                }
-            }
-
-            // priority adjustment
-            KeyCode::Char('+') | KeyCode::Char('l') => {
-                self.adjust_file_priority(true).await;
-            }
-            KeyCode::Char('-') | KeyCode::Char('h') => {
-                self.adjust_file_priority(false).await;
-            }
-
-            // toggle wanted/unwanted
-            KeyCode::Char('x') => {
-                self.toggle_file_wanted().await;
-            }
-
-            // reannounce from file view
-            KeyCode::Char('t') => {
-                if let Some(t) = &self.detail_torrent
-                    && let Err(e) = self.client.reannounce(&[t.id]).await
-                {
-                    self.last_error = Some(e);
-                }
-            }
-
-            _ => {}
+        } else if b.priority_up.matches(code, mods) {
+            self.adjust_file_priority(true).await;
+        } else if b.priority_down.matches(code, mods) {
+            self.adjust_file_priority(false).await;
+        } else if b.toggle_wanted.matches(code, mods) {
+            self.toggle_file_wanted().await;
+        } else if b.reannounce.matches(code, mods)
+            && let Some(t) = &self.detail_torrent
+            && let Err(e) = self.client.reannounce(&[t.id]).await
+        {
+            self.last_error = Some(e);
         }
     }
 
@@ -610,25 +581,23 @@ impl App {
     }
 
     async fn handle_details_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Esc | KeyCode::Char('q') => self.view = View::TorrentList,
-            KeyCode::Char('?') => {
-                self.prev_view = self.view;
-                self.view = View::Help;
-            }
-            KeyCode::Enter => {
-                self.file_cursor = 0;
-                self.file_selected.clear();
-                self.view = View::Files;
-            }
-            KeyCode::Char('t') => {
-                if let Some(t) = &self.detail_torrent
-                    && let Err(e) = self.client.reannounce(&[t.id]).await
-                {
-                    self.last_error = Some(e);
-                }
-            }
-            _ => {}
+        let (code, mods) = (key.code, key.modifiers);
+        let b = &self.bindings;
+
+        if b.back.matches(code, mods) || b.quit.matches(code, mods) {
+            self.view = View::TorrentList;
+        } else if b.help.matches(code, mods) {
+            self.prev_view = self.view;
+            self.view = View::Help;
+        } else if b.enter.matches(code, mods) {
+            self.file_cursor = 0;
+            self.file_selected.clear();
+            self.view = View::Files;
+        } else if b.reannounce.matches(code, mods)
+            && let Some(t) = &self.detail_torrent
+            && let Err(e) = self.client.reannounce(&[t.id]).await
+        {
+            self.last_error = Some(e);
         }
     }
 

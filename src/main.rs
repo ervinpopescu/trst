@@ -1,5 +1,6 @@
 mod app;
 mod client;
+mod config;
 #[allow(dead_code)]
 mod protocol;
 mod ui;
@@ -26,6 +27,7 @@ struct Args {
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let args = Args::parse();
+    let config = config::Config::load();
 
     let auth = match (&args.username, &args.password) {
         (Some(u), Some(p)) => Some((u.as_str(), p.as_str())),
@@ -33,7 +35,7 @@ async fn main() -> std::io::Result<()> {
     };
 
     let client = client::TransmissionClient::new(&args.url, auth);
-    let app = app::App::new(client);
+    let app = app::App::new(client, config);
 
     let terminal = ratatui::init();
     let result = app.run(terminal).await;

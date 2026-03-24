@@ -10,6 +10,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use crate::app::{App, Confirm, View};
+use crate::config::parse_color;
 use crate::util;
 
 pub fn draw(f: &mut Frame, app: &App) {
@@ -40,22 +41,27 @@ pub fn draw(f: &mut Frame, app: &App) {
 }
 
 fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
+    let th = &app.theme;
+    let bar_bg = parse_color(&th.status_bar_bg);
+    let bar_fg = parse_color(&th.status_bar_fg);
+    let bar_style = Style::default().bg(bar_bg).fg(bar_fg);
+
     let mut left_parts: Vec<Span> = vec![];
 
     if let Some(stats) = &app.stats {
         left_parts.push(Span::styled(
             format!(" {} torrents", stats.torrent_count),
-            Style::default().fg(Color::White),
+            Style::default().fg(bar_fg),
         ));
         left_parts.push(Span::raw("  "));
         left_parts.push(Span::styled(
             format!("↓ {}", util::human_speed(stats.download_speed)),
-            Style::default().fg(Color::Green),
+            Style::default().fg(parse_color(&th.speed_down)),
         ));
         left_parts.push(Span::raw("  "));
         left_parts.push(Span::styled(
             format!("↑ {}", util::human_speed(stats.upload_speed)),
-            Style::default().fg(Color::Cyan),
+            Style::default().fg(parse_color(&th.speed_up)),
         ));
     }
 
@@ -63,7 +69,7 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
         left_parts.push(Span::raw("  "));
         left_parts.push(Span::styled(
             format!("err: {err}"),
-            Style::default().fg(Color::Red),
+            Style::default().fg(parse_color(&th.error)),
         ));
     }
 
@@ -86,13 +92,10 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
     let halves = Layout::horizontal([Constraint::Percentage(70), Constraint::Percentage(30)])
         .split(area);
 
-    f.render_widget(
-        Paragraph::new(left).style(Style::default().bg(Color::DarkGray).fg(Color::White)),
-        halves[0],
-    );
+    f.render_widget(Paragraph::new(left).style(bar_style), halves[0]);
     f.render_widget(
         Paragraph::new(right)
-            .style(Style::default().bg(Color::DarkGray).fg(Color::White))
+            .style(bar_style)
             .alignment(ratatui::layout::Alignment::Right),
         halves[1],
     );

@@ -1,19 +1,21 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Block, Borders, Row, Table};
 use ratatui::layout::Constraint;
 
 use crate::app::App;
+use crate::config::parse_color;
 use crate::util;
 
 pub fn draw(f: &mut Frame, app: &App, area: Rect) {
+    let th = &app.theme;
     let visible = app.filtered_torrents();
 
     let header = Row::new([
         "Status", "Name", "Size", "Progress", "↓", "↑", "ETA", "Ratio", "Peers",
     ])
-    .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+    .style(Style::default().fg(parse_color(&th.header)).add_modifier(Modifier::BOLD))
     .bottom_margin(0);
 
     let rows: Vec<Row> = visible
@@ -47,10 +49,16 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
             let is_selected = app.selected.contains(&i);
             let is_cursor = i == app.cursor;
             let style = match (is_selected, is_cursor) {
-                (true, true) => Style::default().bg(Color::LightBlue).fg(Color::Black),
-                (true, false) => Style::default().bg(Color::Blue).fg(Color::White),
-                (false, true) => Style::default().add_modifier(Modifier::REVERSED),
-                (false, false) => style_for_status(t.status),
+                (true, true) => Style::default()
+                    .bg(parse_color(&th.selected_cursor.bg))
+                    .fg(parse_color(&th.selected_cursor.fg)),
+                (true, false) => Style::default()
+                    .bg(parse_color(&th.selected.bg))
+                    .fg(parse_color(&th.selected.fg)),
+                (false, true) => Style::default()
+                    .bg(parse_color(&th.cursor.bg))
+                    .fg(parse_color(&th.cursor.fg)),
+                (false, false) => style_for_status(t.status, th),
             };
 
             Row::new(cells).style(style)
@@ -78,13 +86,14 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(table, area);
 }
 
-fn style_for_status(status: i64) -> Style {
-    match status {
-        0 => Style::default().fg(Color::DarkGray),
-        1 | 2 => Style::default().fg(Color::Magenta),
-        3 | 5 => Style::default().fg(Color::DarkGray),
-        4 => Style::default().fg(Color::Green),
-        6 => Style::default().fg(Color::Cyan),
-        _ => Style::default(),
-    }
+fn style_for_status(status: i64, th: &crate::config::ThemeConfig) -> Style {
+    let color = match status {
+        0 => parse_color(&th.stopped),
+        1 | 2 => parse_color(&th.verifying),
+        3 | 5 => parse_color(&th.queued),
+        4 => parse_color(&th.downloading),
+        6 => parse_color(&th.seeding),
+        _ => parse_color("reset"),
+    };
+    Style::default().fg(color)
 }

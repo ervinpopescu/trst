@@ -1,19 +1,21 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Block, Borders, Row, Table};
 
 use crate::app::App;
+use crate::config::parse_color;
 use crate::protocol::FilePriority;
 use crate::util;
 
 pub fn draw(f: &mut Frame, app: &App, area: Rect) {
+    let th = &app.theme;
     let Some(torrent) = &app.detail_torrent else {
         return;
     };
 
     let header = Row::new(["Pri", "Name", "Size", "Done", "Progress"])
-        .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+        .style(Style::default().fg(parse_color(&th.header)).add_modifier(Modifier::BOLD));
 
     let rows: Vec<Row> = torrent
         .files
@@ -38,11 +40,11 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
                 util::percent(fraction),
             );
 
-            let prio_style = match prio {
-                FilePriority::Unwanted => Style::default().fg(Color::DarkGray),
-                FilePriority::Low => Style::default().fg(Color::Blue),
-                FilePriority::Normal => Style::default().fg(Color::White),
-                FilePriority::High => Style::default().fg(Color::Red),
+            let prio_color = match prio {
+                FilePriority::Unwanted => parse_color(&th.priority_skip),
+                FilePriority::Low => parse_color(&th.priority_low),
+                FilePriority::Normal => parse_color(&th.priority_normal),
+                FilePriority::High => parse_color(&th.priority_high),
             };
 
             let display_name = file
@@ -52,7 +54,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
                 .unwrap_or(&file.name);
 
             let cells = vec![
-                ratatui::text::Text::styled(prio.label().to_string(), prio_style),
+                ratatui::text::Text::styled(prio.label().to_string(), Style::default().fg(prio_color)),
                 ratatui::text::Text::raw(display_name.to_string()),
                 ratatui::text::Text::raw(util::human_bytes(file.length)),
                 ratatui::text::Text::raw(util::human_bytes(done_bytes)),
@@ -62,9 +64,15 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
             let is_selected = app.file_selected.contains(&i);
             let is_cursor = i == app.file_cursor;
             let style = match (is_selected, is_cursor) {
-                (true, true) => Style::default().bg(Color::LightBlue).fg(Color::Black),
-                (true, false) => Style::default().bg(Color::Blue).fg(Color::White),
-                (false, true) => Style::default().add_modifier(Modifier::REVERSED),
+                (true, true) => Style::default()
+                    .bg(parse_color(&th.selected_cursor.bg))
+                    .fg(parse_color(&th.selected_cursor.fg)),
+                (true, false) => Style::default()
+                    .bg(parse_color(&th.selected.bg))
+                    .fg(parse_color(&th.selected.fg)),
+                (false, true) => Style::default()
+                    .bg(parse_color(&th.cursor.bg))
+                    .fg(parse_color(&th.cursor.fg)),
                 (false, false) => Style::default(),
             };
 
