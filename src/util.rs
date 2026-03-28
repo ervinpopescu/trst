@@ -55,3 +55,55 @@ pub fn progress_bar(fraction: f64, width: usize) -> String {
 pub fn percent(fraction: f64) -> String {
     format!("{:.1}%", fraction * 100.0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_human_bytes() {
+        assert_eq!(human_bytes(0), "0 B");
+        assert_eq!(human_bytes(500), "500 B");
+        assert_eq!(human_bytes(1024), "1 KB");
+        assert_eq!(human_bytes(1025), "1 KB");
+        assert_eq!(human_bytes(1024 * 1024), "1 MB");
+        assert_eq!(human_bytes((1.5 * 1024.0 * 1024.0) as i64), "1.5 MB");
+        assert_eq!(human_bytes(1024 * 1024 * 1024), "1 GB");
+        assert_eq!(human_bytes(1024 * 1024 * 1024 * 1024), "1 TB");
+        assert_eq!(human_bytes(1024 * 1024 * 1024 * 1024 * 1024), "1.0 PB");
+    }
+
+    #[test]
+    fn test_human_speed() {
+        assert_eq!(human_speed(0), "0 B/s");
+        assert_eq!(human_speed(1024), "1 KB/s");
+        assert_eq!(human_speed(1536), "1.5 KB/s");
+    }
+
+    #[test]
+    fn test_human_eta() {
+        assert_eq!(human_eta(-1), "∞");
+        assert_eq!(human_eta(0), "done");
+        assert_eq!(human_eta(30), "30s");
+        assert_eq!(human_eta(90), "1m 30s");
+        assert_eq!(human_eta(3600), "1h 00m");
+        assert_eq!(human_eta(3665), "1h 01m");
+        assert_eq!(human_eta(86400), "24h 00m");
+        assert_eq!(human_eta(90000), "1d 1h");
+    }
+
+    #[test]
+    fn test_progress_bar() {
+        assert_eq!(progress_bar(0.0, 10), "░░░░░░░░░░");
+        assert_eq!(progress_bar(0.5, 10), "█████░░░░░");
+        assert_eq!(progress_bar(1.0, 10), "██████████");
+        assert_eq!(progress_bar(0.25, 4), "█░░░");
+    }
+
+    #[test]
+    fn test_percent() {
+        assert_eq!(percent(0.0), "0.0%");
+        assert_eq!(percent(0.55), "55.0%");
+        assert_eq!(percent(1.0), "100.0%");
+    }
+}

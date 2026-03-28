@@ -785,3 +785,156 @@ impl App {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client::TransmissionClient;
+    use crate::config::Config;
+    use crate::protocol::{Torrent, TrackerStats};
+
+    #[test]
+    fn test_sort_column() {
+        assert_eq!(SortColumn::Name.label(), "name");
+        assert_eq!(SortColumn::Name.next(), SortColumn::Size);
+        assert_eq!(SortColumn::Queue.next(), SortColumn::Name);
+    }
+
+    #[test]
+    fn test_filtering() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None),
+            Config::default(),
+        );
+
+        let mut t1 = Torrent::default();
+        t1.name = "ubuntu.iso".into();
+        t1.status = 4; // Downloading
+        t1.tracker_stats.push(TrackerStats {
+            host: "tracker.ubuntu.com".into(),
+            ..Default::default()
+        });
+
+        let mut t2 = Torrent::default();
+        t2.name = "debian.iso".into();
+        t2.status = 6; // Seeding
+        t2.tracker_stats.push(TrackerStats {
+            host: "tracker.debian.org".into(),
+            ..Default::default()
+        });
+
+        app.torrents = vec![t1.clone(), t2.clone()];
+
+        assert_eq!(app.filtered_torrents().len(), 2);
+
+        app.filter_input = "ubuntu".into();
+        assert_eq!(app.filtered_torrents().len(), 1);
+
+        app.filter_input = "status:seeding".into();
+        assert_eq!(app.filtered_torrents().len(), 1);
+        assert_eq!(app.filtered_torrents()[0].name, "debian.iso");
+
+        app.filter_input = "tracker:ubuntu.com".into();
+        assert_eq!(app.filtered_torrents().len(), 1);
+        assert_eq!(app.filtered_torrents()[0].name, "ubuntu.iso");
+    }
+
+    #[test]
+    fn test_cursor_movement() {
+        let mut cursor = 0;
+        let mut selected = std::collections::BTreeSet::new();
+
+        App::move_down(&mut cursor, &mut selected, 5, false);
+        assert_eq!(cursor, 1);
+        assert!(selected.is_empty());
+
+        App::move_down(&mut cursor, &mut selected, 5, true);
+        assert_eq!(cursor, 2);
+        assert!(selected.contains(&1));
+        assert!(selected.contains(&2));
+
+        App::move_up(&mut cursor, &mut selected, false);
+        assert_eq!(cursor, 1);
+        assert_eq!(selected.len(), 2);
+
+        App::move_up(&mut cursor, &mut selected, true);
+        assert_eq!(cursor, 0);
+        assert!(selected.contains(&0));
+        assert!(selected.contains(&1));
+    }
+
+    #[test]
+    fn test_sorting() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None),
+            Config::default(),
+        );
+
+        let mut t1 = Torrent::default();
+        t1.name = "B".into();
+        t1.total_size = 100;
+        t1.percent_done = 0.5;
+        t1.rate_download = 50;
+        t1.eta = 10;
+        t1.queue_position = 2;
+        t1.status = 1;
+
+        let mut t2 = Torrent::default();
+        t2.name = "A".into();
+        t2.total_size = 200;
+        t2.percent_done = 0.8;
+        t2.rate_download = 20;
+        t2.eta = 20;
+        t2.queue_position = 1;
+        t2.status = 2;
+
+        let mut list = vec![t1, t2];
+
+        // Sort by Name, asc
+        app.sort_column = SortColumn::Name;
+        app.sort_ascending = true;
+        app.sort_torrents(&mut list);
+        assert_eq!(list[0].name, "A");
+
+        // Sort by Name, desc
+        app.sort_ascending = false;
+        app.sort_torrents(&mut list);
+        assert_eq!(list[0].name, "B");
+
+        // Sort by Size, asc
+        app.sort_column = SortColumn::Size;
+        app.sort_ascending = true;
+        app.sort_torrents(&mut list);
+        assert_eq!(list[0].name, "B");
+
+        // Sort by Progress, desc
+        app.sort_column = SortColumn::Progress;
+        app.sort_ascending = false;
+        app.sort_torrents(&mut list);
+        assert_eq!(list[0].name, "A");
+
+        // Sort by Down, desc
+        app.sort_column = SortColumn::Down;
+        app.sort_ascending = false;
+        app.sort_torrents(&mut list);
+        assert_eq!(list[0].name, "B");
+
+        // Sort by ETA, asc
+        app.sort_column = SortColumn::Eta;
+        app.sort_ascending = true;
+        app.sort_torrents(&mut list);
+        assert_eq!(list[0].name, "B");
+
+        // Sort by Queue, asc
+        app.sort_column = SortColumn::Queue;
+        app.sort_ascending = true;
+        app.sort_torrents(&mut list);
+        assert_eq!(list[0].name, "A");
+
+        // Sort by Status, asc
+        app.sort_column = SortColumn::Status;
+        app.sort_ascending = true;
+        app.sort_torrents(&mut list);
+        assert_eq!(list[0].name, "B");
+    }
+}

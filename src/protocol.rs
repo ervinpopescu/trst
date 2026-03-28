@@ -299,3 +299,94 @@ pub const TORRENT_DETAIL_FIELDS: &[&str] = &[
     "trackerStats",
     "peers",
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_status_str() {
+        let mut t = Torrent::default();
+        t.status = 0;
+        assert_eq!(t.status_str(), "Stopped");
+        assert!(t.is_stopped());
+
+        t.status = 1;
+        assert_eq!(t.status_str(), "Queued verify");
+        assert!(!t.is_stopped());
+
+        t.status = 2;
+        assert_eq!(t.status_str(), "Verifying");
+
+        t.status = 3;
+        assert_eq!(t.status_str(), "Queued");
+
+        t.status = 4;
+        assert_eq!(t.status_str(), "Downloading");
+
+        t.status = 5;
+        assert_eq!(t.status_str(), "Queued seed");
+
+        t.status = 6;
+        assert_eq!(t.status_str(), "Seeding");
+
+        t.status = 99;
+        assert_eq!(t.status_str(), "Unknown");
+    }
+
+    #[test]
+    fn test_file_priority() {
+        // Test from_stats
+        let stats_unwanted = FileStats {
+            wanted: false,
+            priority: 0,
+            bytes_completed: 0,
+        };
+        assert_eq!(
+            FilePriority::from_stats(&stats_unwanted),
+            FilePriority::Unwanted
+        );
+
+        let stats_low = FileStats {
+            wanted: true,
+            priority: -1,
+            bytes_completed: 0,
+        };
+        assert_eq!(FilePriority::from_stats(&stats_low), FilePriority::Low);
+
+        let stats_normal = FileStats {
+            wanted: true,
+            priority: 0,
+            bytes_completed: 0,
+        };
+        assert_eq!(
+            FilePriority::from_stats(&stats_normal),
+            FilePriority::Normal
+        );
+
+        let stats_high = FileStats {
+            wanted: true,
+            priority: 1,
+            bytes_completed: 0,
+        };
+        assert_eq!(FilePriority::from_stats(&stats_high), FilePriority::High);
+
+        // Test next
+        assert_eq!(FilePriority::Unwanted.next(), FilePriority::Low);
+        assert_eq!(FilePriority::Low.next(), FilePriority::Normal);
+        assert_eq!(FilePriority::Normal.next(), FilePriority::High);
+        assert_eq!(FilePriority::High.next(), FilePriority::Unwanted);
+
+        // Test prev
+        assert_eq!(FilePriority::Unwanted.prev(), FilePriority::High);
+        assert_eq!(FilePriority::High.prev(), FilePriority::Normal);
+        assert_eq!(FilePriority::Normal.prev(), FilePriority::Low);
+        assert_eq!(FilePriority::Low.prev(), FilePriority::Unwanted);
+
+        // Test label
+        assert_eq!(FilePriority::Unwanted.label(), "skip");
+        assert_eq!(FilePriority::Low.label(), "low");
+        assert_eq!(FilePriority::Normal.label(), "normal");
+        assert_eq!(FilePriority::High.label(), "high");
+    }
+}
