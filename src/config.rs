@@ -1,11 +1,11 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::style::Color;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 // --- Top-level config ---
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Serialize, Default)]
 #[serde(default)]
 pub struct Config {
     pub theme: ThemeConfig,
@@ -23,7 +23,16 @@ impl Config {
                     Self::default()
                 }
             },
-            Err(_) => Self::default(),
+            Err(_) => {
+                let cfg = Self::default();
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                if let Ok(toml) = toml::to_string_pretty(&cfg) {
+                    let _ = std::fs::write(&path, toml);
+                }
+                cfg
+            }
         }
     }
 }
@@ -37,7 +46,7 @@ fn config_path() -> PathBuf {
 
 // --- Theme ---
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(default)]
 pub struct ThemeConfig {
     pub cursor: ColorPair,
@@ -101,7 +110,7 @@ impl Default for ThemeConfig {
     }
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Serialize, Clone)]
 #[serde(default)]
 pub struct ColorPair {
     pub fg: String,
@@ -148,7 +157,7 @@ pub fn parse_color(s: &str) -> Color {
 
 // --- Keybindings ---
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(default)]
 pub struct KeysConfig {
     // global

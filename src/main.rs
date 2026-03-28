@@ -64,8 +64,8 @@ fn parse_args() -> Args {
 }
 
 fn main() -> std::io::Result<()> {
-    let args = parse_args();
     let config = config::Config::load();
+    let args = parse_args();
 
     let auth = match (&args.username, &args.password) {
         (Some(u), Some(p)) => Some((u.as_str(), p.as_str())),
