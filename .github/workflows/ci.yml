@@ -18,7 +18,7 @@ jobs:
     - name: Setup Rust
       uses: dtolnay/rust-toolchain@stable
       with:
-        components: clippy, rustfmt
+        components: clippy, rustfmt, llvm-tools-preview
     - name: Format
       run: cargo fmt -- --check
     - name: Lint (Clippy)
@@ -27,12 +27,11 @@ jobs:
       run: cargo build --verbose
     - name: Run tests
       run: cargo test --verbose
-    - name: Install cargo-tarpaulin
-      run: cargo install cargo-tarpaulin
     - name: Coverage
-      run: cargo tarpaulin --out xml
+      run: cargo llvm-cov --lcov --output-path lcov.info --ignore-filename-regex "src/main.rs|src/ui/.*"
     - name: Upload to Codecov
       uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
+        files: lcov.info
         fail_ci_if_error: true
