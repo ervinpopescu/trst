@@ -13,10 +13,13 @@ pub struct TransmissionClient {
 
 impl TransmissionClient {
     pub fn new(url: &str, auth: Option<(&str, &str)>) -> Self {
-        let agent = ureq::AgentBuilder::new()
-            .timeout_connect(Duration::from_secs(5))
-            .timeout_read(Duration::from_secs(10))
-            .build();
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_secs(5)))
+            .timeout_global(Some(Duration::from_secs(10)))
+            .http_status_as_error(false)
+            .build()
+            .into();
+
         let auth_header = auth.map(|(u, p)| {
             format!("Basic {}", base64_encode(&format!("{u}:{p}")))
         });
@@ -34,40 +37,42 @@ impl TransmissionClient {
             arguments: args,
             tag: None,
         };
-        let body_str = serde_json::to_string(&body).map_err(|e| e.to_string())?;
+        let body_str = serde_json::to_string(&body).map_err(|e: serde_json::Error| e.to_string())?;
 
         for _ in 0..2 {
-            let mut req = self
-                .agent
-                .post(&self.url)
-                .set("Content-Type", "application/json");
+            let mut req = self.agent.post(&self.url)
+                .header("Content-Type", "application/json");
 
             if let Some(auth) = &self.auth_header {
-                req = req.set("Authorization", auth);
+                req = req.header("Authorization", auth);
             }
             if let Some(sid) = self.session_id.lock().unwrap().as_deref() {
-                req = req.set("X-Transmission-Session-Id", sid);
+                req = req.header("X-Transmission-Session-Id", sid);
             }
 
-            match req.send_string(&body_str) {
-                Ok(resp) => {
-                    let text = resp.into_string().map_err(|e| e.to_string())?;
-                    let rpc: RpcResponse =
-                        serde_json::from_str(&text).map_err(|e| e.to_string())?;
+            match req.send(&body_str) {
+                Ok(mut resp) => {
+                    if resp.status() == 409 {
+                        if let Some(sid) = resp.headers().get("X-Transmission-Session-Id") {
+                            let sid_str = sid.to_str().unwrap_or_default();
+                            *self.session_id.lock().unwrap() = Some(sid_str.to_string());
+                            continue;
+                        }
+                        return Err("409 without session ID header".into());
+                    }
+
+                    if !resp.status().is_success() {
+                        return Err(format!("HTTP {}", resp.status()));
+                    }
+
+                    let rpc: RpcResponse = resp.body_mut()
+                        .read_json()
+                        .map_err(|e: ureq::Error| e.to_string())?;
+
                     if rpc.result != "success" {
                         return Err(format!("RPC error: {}", rpc.result));
                     }
                     return Ok(rpc);
-                }
-                Err(ureq::Error::Status(409, resp)) => {
-                    if let Some(sid) = resp.header("X-Transmission-Session-Id") {
-                        *self.session_id.lock().unwrap() = Some(sid.to_string());
-                        continue;
-                    }
-                    return Err("409 without session ID header".into());
-                }
-                Err(ureq::Error::Status(code, _)) => {
-                    return Err(format!("HTTP {code}"));
                 }
                 Err(e) => return Err(e.to_string()),
             }
@@ -81,7 +86,7 @@ impl TransmissionClient {
         let resp = self.rpc("torrent-get", Some(args))?;
         let torrents: Vec<Torrent> =
             serde_json::from_value(resp.arguments["torrents"].clone())
-                .map_err(|e| e.to_string())?;
+                .map_err(|e: serde_json::Error| e.to_string())?;
         Ok(torrents)
     }
 
@@ -90,7 +95,7 @@ impl TransmissionClient {
         let resp = self.rpc("torrent-get", Some(args))?;
         let torrents: Vec<Torrent> =
             serde_json::from_value(resp.arguments["torrents"].clone())
-                .map_err(|e| e.to_string())?;
+                .map_err(|e: serde_json::Error| e.to_string())?;
         Ok(torrents.into_iter().next())
     }
 
@@ -190,13 +195,13 @@ impl TransmissionClient {
 
     pub fn session_stats(&self) -> Result<SessionStats, String> {
         let resp = self.rpc("session-stats", None)?;
-        serde_json::from_value(resp.arguments).map_err(|e| e.to_string())
+        serde_json::from_value(resp.arguments).map_err(|e: serde_json::Error| e.to_string())
     }
 
     pub fn free_space(&self, path: &str) -> Result<FreeSpace, String> {
         let args = json!({ "path": path });
         let resp = self.rpc("free-space", Some(args))?;
-        serde_json::from_value(resp.arguments).map_err(|e| e.to_string())
+        serde_json::from_value(resp.arguments).map_err(|e: serde_json::Error| e.to_string())
     }
 }
 
