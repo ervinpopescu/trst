@@ -80,9 +80,18 @@ pub struct ThemeConfig {
 impl Default for ThemeConfig {
     fn default() -> Self {
         Self {
-            cursor: ColorPair { fg: "black".into(), bg: "white".into() },
-            selected: ColorPair { fg: "white".into(), bg: "blue".into() },
-            selected_cursor: ColorPair { fg: "black".into(), bg: "light_blue".into() },
+            cursor: ColorPair {
+                fg: "black".into(),
+                bg: "white".into(),
+            },
+            selected: ColorPair {
+                fg: "white".into(),
+                bg: "blue".into(),
+            },
+            selected_cursor: ColorPair {
+                fg: "black".into(),
+                bg: "light_blue".into(),
+            },
 
             downloading: "green".into(),
             seeding: "cyan".into(),
@@ -283,8 +292,7 @@ impl KeyBind {
         // for char keys, compare case-insensitively and check shift via modifiers
         match (self.code, code) {
             (KeyCode::Char(a), KeyCode::Char(b)) => {
-                a.eq_ignore_ascii_case(&b)
-                    && self.modifiers == modifiers
+                a.eq_ignore_ascii_case(&b) && self.modifiers == modifiers
             }
             _ => self.code == code && modifiers.contains(self.modifiers),
         }
@@ -410,5 +418,41 @@ impl Bindings {
             toggle_wanted: bind(&k.toggle_wanted, &defaults.toggle_wanted),
             back: bind(&k.back, &defaults.back),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_color() {
+        assert_eq!(parse_color("red"), Color::Red);
+        assert_eq!(parse_color("light_blue"), Color::LightBlue);
+        assert_eq!(parse_color("lightblue"), Color::LightBlue);
+        assert_eq!(parse_color("#123456"), Color::Rgb(0x12, 0x34, 0x56));
+        assert_eq!(parse_color(""), Color::Reset);
+        assert_eq!(parse_color("invalid"), Color::Reset);
+    }
+
+    #[test]
+    fn test_keybind_parse() {
+        let kb = KeyBind::parse("shift+k").unwrap();
+        assert_eq!(kb.code, KeyCode::Char('k'));
+        assert_eq!(kb.modifiers, KeyModifiers::SHIFT);
+
+        let kb = KeyBind::parse("ctrl+c").unwrap();
+        assert_eq!(kb.code, KeyCode::Char('c'));
+        assert_eq!(kb.modifiers, KeyModifiers::CONTROL);
+
+        let kb = KeyBind::parse("+").unwrap();
+        assert_eq!(kb.code, KeyCode::Char('+'));
+        assert_eq!(kb.modifiers, KeyModifiers::empty());
+
+        let kb = KeyBind::parse("shift++").unwrap();
+        assert_eq!(kb.code, KeyCode::Char('+'));
+        assert_eq!(kb.modifiers, KeyModifiers::SHIFT);
+
+        assert!(KeyBind::parse("invalid_key").is_none());
     }
 }

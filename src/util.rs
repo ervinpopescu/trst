@@ -49,10 +49,7 @@ pub fn human_eta(seconds: i64) -> String {
 pub fn progress_bar(fraction: f64, width: usize) -> String {
     let filled = (fraction * width as f64).round() as usize;
     let empty = width.saturating_sub(filled);
-    format!("{}{}",
-        "█".repeat(filled),
-        "░".repeat(empty),
-    )
+    format!("{}{}", "█".repeat(filled), "░".repeat(empty),)
 }
 
 pub fn percent(fraction: f64) -> String {

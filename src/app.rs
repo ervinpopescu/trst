@@ -162,19 +162,25 @@ impl App {
 
         if let Some(status) = raw.strip_prefix("status:") {
             let status = status.trim();
-            return self.torrents.iter().filter(|t| {
-                t.status_str().to_lowercase() == status
-            }).collect();
+            return self
+                .torrents
+                .iter()
+                .filter(|t| t.status_str().to_lowercase() == status)
+                .collect();
         }
 
         if let Some(tracker) = raw.strip_prefix("tracker:") {
             let tracker = tracker.trim();
-            return self.torrents.iter().filter(|t| {
-                t.tracker_stats.iter().any(|ts| {
-                    ts.host.to_lowercase().contains(tracker)
-                        || ts.announce.to_lowercase().contains(tracker)
+            return self
+                .torrents
+                .iter()
+                .filter(|t| {
+                    t.tracker_stats.iter().any(|ts| {
+                        ts.host.to_lowercase().contains(tracker)
+                            || ts.announce.to_lowercase().contains(tracker)
+                    })
                 })
-            }).collect();
+                .collect();
         }
 
         // default: filter by name
@@ -187,7 +193,10 @@ impl App {
     pub fn target_ids(&self) -> Vec<i64> {
         let visible = self.filtered_torrents();
         if self.selected.is_empty() {
-            visible.get(self.cursor).map(|t| vec![t.id]).unwrap_or_default()
+            visible
+                .get(self.cursor)
+                .map(|t| vec![t.id])
+                .unwrap_or_default()
         } else {
             self.selected
                 .iter()
@@ -260,12 +269,14 @@ impl App {
             self.stats = Some(s);
         }
         if self.default_download_dir.is_none()
-            && let Ok(resp) = self.client.get_torrents(&["id", "downloadDir"])            && let Some(t) = resp.first().filter(|t| !t.download_dir.is_empty())
+            && let Ok(resp) = self.client.get_torrents(&["id", "downloadDir"])
+            && let Some(t) = resp.first().filter(|t| !t.download_dir.is_empty())
         {
             self.default_download_dir = Some(t.download_dir.clone());
         }
         if let Some(dir) = &self.default_download_dir
-            && let Ok(f) = self.client.free_space(dir)        {
+            && let Ok(f) = self.client.free_space(dir)
+        {
             self.free = Some(f);
         }
     }
@@ -276,11 +287,17 @@ impl App {
             let ord = match self.sort_column {
                 SortColumn::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
                 SortColumn::Size => a.total_size.cmp(&b.total_size),
-                SortColumn::Progress => a.percent_done.partial_cmp(&b.percent_done).unwrap_or(std::cmp::Ordering::Equal),
+                SortColumn::Progress => a
+                    .percent_done
+                    .partial_cmp(&b.percent_done)
+                    .unwrap_or(std::cmp::Ordering::Equal),
                 SortColumn::Down => a.rate_download.cmp(&b.rate_download),
                 SortColumn::Up => a.rate_upload.cmp(&b.rate_upload),
                 SortColumn::Eta => a.eta.cmp(&b.eta),
-                SortColumn::Ratio => a.upload_ratio.partial_cmp(&b.upload_ratio).unwrap_or(std::cmp::Ordering::Equal),
+                SortColumn::Ratio => a
+                    .upload_ratio
+                    .partial_cmp(&b.upload_ratio)
+                    .unwrap_or(std::cmp::Ordering::Equal),
                 SortColumn::Status => a.status.cmp(&b.status),
                 SortColumn::Queue => a.queue_position.cmp(&b.queue_position),
             };
@@ -288,7 +305,12 @@ impl App {
         });
     }
 
-    fn move_down(cursor: &mut usize, selected: &mut BTreeSet<usize>, limit: usize, selecting: bool) {
+    fn move_down(
+        cursor: &mut usize,
+        selected: &mut BTreeSet<usize>,
+        limit: usize,
+        selecting: bool,
+    ) {
         if selecting {
             selected.insert(*cursor);
             if *cursor + 1 < limit {
@@ -355,7 +377,12 @@ impl App {
             self.help_scroll = 0;
             self.view = View::Help;
         } else if is_down || is_select_down {
-            Self::move_down(&mut self.cursor, &mut self.selected, visible_len, is_select_down);
+            Self::move_down(
+                &mut self.cursor,
+                &mut self.selected,
+                visible_len,
+                is_select_down,
+            );
         } else if is_up || is_select_up {
             Self::move_up(&mut self.cursor, &mut self.selected, is_select_up);
         } else if b.top.matches(code, mods) || code == KeyCode::Home {
@@ -410,8 +437,10 @@ impl App {
                     || (self.selected.is_empty()
                         && visible.get(self.cursor).is_some_and(|t| t.is_stopped()));
                 let result = if any_stopped {
-                    self.client.start(&ids)                } else {
-                    self.client.stop(&ids)                };
+                    self.client.start(&ids)
+                } else {
+                    self.client.stop(&ids)
+                };
                 if let Err(e) = result {
                     self.last_error = Some(e);
                 }
@@ -481,7 +510,9 @@ impl App {
         match key.code {
             KeyCode::Enter => {
                 let loc = self.add_input.trim().to_string();
-                if !loc.is_empty() && let Err(e) = self.client.add(&loc) {
+                if !loc.is_empty()
+                    && let Err(e) = self.client.add(&loc)
+                {
                     self.last_error = Some(e);
                 }
                 self.adding = false;
@@ -537,7 +568,12 @@ impl App {
             self.help_scroll = 0;
             self.view = View::Help;
         } else if is_down || is_select_down {
-            Self::move_down(&mut self.file_cursor, &mut self.file_selected, file_count, is_select_down);
+            Self::move_down(
+                &mut self.file_cursor,
+                &mut self.file_selected,
+                file_count,
+                is_select_down,
+            );
         } else if is_up || is_select_up {
             Self::move_up(&mut self.file_cursor, &mut self.file_selected, is_select_up);
         } else if b.top.matches(code, mods) || code == KeyCode::Home {
@@ -562,7 +598,8 @@ impl App {
             self.confirm = Some(Confirm::DeleteFileFromDisk);
         } else if b.reannounce.matches(code, mods)
             && let Some(t) = &self.detail_torrent
-            && let Err(e) = self.client.reannounce(&[t.id])        {
+            && let Err(e) = self.client.reannounce(&[t.id])
+        {
             self.last_error = Some(e);
         }
     }
@@ -578,7 +615,11 @@ impl App {
             .filter_map(|&i| {
                 torrent.file_stats.get(i).map(|stats| {
                     let current = FilePriority::from_stats(stats);
-                    let next = if increase { current.next() } else { current.prev() };
+                    let next = if increase {
+                        current.next()
+                    } else {
+                        current.prev()
+                    };
                     (i, next)
                 })
             })
@@ -670,7 +711,8 @@ impl App {
             self.view = View::Files;
         } else if b.reannounce.matches(code, mods)
             && let Some(t) = &self.detail_torrent
-            && let Err(e) = self.client.reannounce(&[t.id])        {
+            && let Err(e) = self.client.reannounce(&[t.id])
+        {
             self.last_error = Some(e);
         }
     }
@@ -678,8 +720,10 @@ impl App {
     fn handle_help_key(&mut self, key: KeyEvent) {
         let (code, mods) = (key.code, key.modifiers);
         let b = &self.bindings;
-        if b.quit.matches(code, mods) || b.back.matches(code, mods)
-            || b.help.matches(code, mods) || code == KeyCode::Esc
+        if b.quit.matches(code, mods)
+            || b.back.matches(code, mods)
+            || b.help.matches(code, mods)
+            || code == KeyCode::Esc
         {
             self.help_scroll = 0;
             self.view = self.prev_view;

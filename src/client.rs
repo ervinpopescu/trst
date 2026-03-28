@@ -1,4 +1,4 @@
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -20,9 +20,8 @@ impl TransmissionClient {
             .build()
             .into();
 
-        let auth_header = auth.map(|(u, p)| {
-            format!("Basic {}", base64_encode(&format!("{u}:{p}")))
-        });
+        let auth_header =
+            auth.map(|(u, p)| format!("Basic {}", base64_encode(&format!("{u}:{p}"))));
         Self {
             agent,
             url: url.to_string(),
@@ -37,10 +36,13 @@ impl TransmissionClient {
             arguments: args,
             tag: None,
         };
-        let body_str = serde_json::to_string(&body).map_err(|e: serde_json::Error| e.to_string())?;
+        let body_str =
+            serde_json::to_string(&body).map_err(|e: serde_json::Error| e.to_string())?;
 
         for _ in 0..2 {
-            let mut req = self.agent.post(&self.url)
+            let mut req = self
+                .agent
+                .post(&self.url)
                 .header("Content-Type", "application/json");
 
             if let Some(auth) = &self.auth_header {
@@ -65,7 +67,8 @@ impl TransmissionClient {
                         return Err(format!("HTTP {}", resp.status()));
                     }
 
-                    let rpc: RpcResponse = resp.body_mut()
+                    let rpc: RpcResponse = resp
+                        .body_mut()
                         .read_json()
                         .map_err(|e: ureq::Error| e.to_string())?;
 
@@ -84,18 +87,16 @@ impl TransmissionClient {
     pub fn get_torrents(&self, fields: &[&str]) -> Result<Vec<Torrent>, String> {
         let args = json!({ "fields": fields });
         let resp = self.rpc("torrent-get", Some(args))?;
-        let torrents: Vec<Torrent> =
-            serde_json::from_value(resp.arguments["torrents"].clone())
-                .map_err(|e: serde_json::Error| e.to_string())?;
+        let torrents: Vec<Torrent> = serde_json::from_value(resp.arguments["torrents"].clone())
+            .map_err(|e: serde_json::Error| e.to_string())?;
         Ok(torrents)
     }
 
     pub fn get_torrent(&self, id: i64, fields: &[&str]) -> Result<Option<Torrent>, String> {
         let args = json!({ "ids": [id], "fields": fields });
         let resp = self.rpc("torrent-get", Some(args))?;
-        let torrents: Vec<Torrent> =
-            serde_json::from_value(resp.arguments["torrents"].clone())
-                .map_err(|e: serde_json::Error| e.to_string())?;
+        let torrents: Vec<Torrent> = serde_json::from_value(resp.arguments["torrents"].clone())
+            .map_err(|e: serde_json::Error| e.to_string())?;
         Ok(torrents.into_iter().next())
     }
 
@@ -228,4 +229,24 @@ fn base64_encode(input: &str) -> String {
         });
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_base64_encode() {
+        assert_eq!(base64_encode(""), "");
+        assert_eq!(base64_encode("f"), "Zg==");
+        assert_eq!(base64_encode("fo"), "Zm8=");
+        assert_eq!(base64_encode("foo"), "Zm9v");
+        assert_eq!(base64_encode("foob"), "Zm9vYg==");
+        assert_eq!(base64_encode("fooba"), "Zm9vYmE=");
+        assert_eq!(base64_encode("foobar"), "Zm9vYmFy");
+        assert_eq!(
+            base64_encode("user:password123"),
+            "dXNlcjpwYXNzd29yZDEyMw=="
+        );
+    }
 }

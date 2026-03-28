@@ -2,7 +2,9 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap};
+use ratatui::widgets::{
+    Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
+};
 
 use crate::app::App;
 use crate::config::parse_color;
@@ -51,7 +53,10 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
                 (format_bind(&k.select_toggle), "Toggle select"),
                 (format_bind(&k.priority_up), "Increase priority"),
                 (format_bind(&k.priority_down), "Decrease priority"),
-                (format_bind(&k.toggle_wanted), "Toggle download (wanted/skip)"),
+                (
+                    format_bind(&k.toggle_wanted),
+                    "Toggle download (wanted/skip)",
+                ),
                 (format_bind(&k.delete), "Delete file(s) from disk"),
                 (format_bind(&k.reannounce), "Reannounce"),
                 (format_bind(&k.back), "Back to list"),
@@ -78,10 +83,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::raw(""));
         for (key, desc) in bindings {
             lines.push(Line::from(vec![
-                Span::styled(
-                    format!("    {key:<16}"),
-                    Style::default().fg(key_color),
-                ),
+                Span::styled(format!("    {key:<16}"), Style::default().fg(key_color)),
                 Span::raw(*desc),
             ]));
         }

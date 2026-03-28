@@ -34,7 +34,9 @@ fn parse_args() -> Args {
                 println!("trst — Transmission remote TUI\n");
                 println!("Usage: trst [HOST[:PORT]] [OPTIONS]\n");
                 println!("Arguments:");
-                println!("  [HOST[:PORT] | URL]    Transmission host or full URL [default: localhost:9091]");
+                println!(
+                    "  [HOST[:PORT] | URL]    Transmission host or full URL [default: localhost:9091]"
+                );
                 println!("\nOptions:");
                 println!("  -u, --url <URL>        Full RPC URL (overrides positional)");
                 println!("  -n, --username <USER>  Username for authentication");
@@ -54,7 +56,11 @@ fn parse_args() -> Args {
         args.url = match host.as_deref() {
             Some(h) if h.starts_with("http://") || h.starts_with("https://") => h.to_string(),
             Some(h) => {
-                let h = if h.contains(':') { h.to_string() } else { format!("{h}:9091") };
+                let h = if h.contains(':') {
+                    h.to_string()
+                } else {
+                    format!("{h}:9091")
+                };
                 format!("http://{h}/transmission/rpc")
             }
             None => "http://localhost:9091/transmission/rpc".into(),

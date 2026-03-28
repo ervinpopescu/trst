@@ -1,8 +1,8 @@
 use ratatui::Frame;
+use ratatui::layout::Constraint;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Block, Borders, Row, Table};
-use ratatui::layout::Constraint;
 
 use crate::app::App;
 use crate::config::parse_color;
@@ -14,7 +14,9 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
 
     let sort_idx = app.sort_column.column_index();
     let sort_arrow = if app.sort_ascending { "▲" } else { "▼" };
-    let labels = ["Status", "Name", "Size", "Progress", "↓", "↑", "ETA", "Ratio", "Peers"];
+    let labels = [
+        "Status", "Name", "Size", "Progress", "↓", "↑", "ETA", "Ratio", "Peers",
+    ];
     let header_cells: Vec<String> = labels
         .iter()
         .enumerate()
@@ -28,7 +30,11 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     let header = Row::new(header_cells)
-        .style(Style::default().fg(parse_color(&th.header)).add_modifier(Modifier::BOLD))
+        .style(
+            Style::default()
+                .fg(parse_color(&th.header))
+                .add_modifier(Modifier::BOLD),
+        )
         .bottom_margin(0);
 
     let rows: Vec<Row> = visible

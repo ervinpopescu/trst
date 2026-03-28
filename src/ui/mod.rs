@@ -1,7 +1,7 @@
-mod torrent_list;
-mod files;
 mod details;
+mod files;
 mod help;
+mod torrent_list;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -14,11 +14,7 @@ use crate::config::parse_color;
 use crate::util;
 
 pub fn draw(f: &mut Frame, app: &App) {
-    let chunks = Layout::vertical([
-        Constraint::Min(1),
-        Constraint::Length(1),
-    ])
-    .split(f.area());
+    let chunks = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(f.area());
 
     match app.view {
         View::TorrentList => torrent_list::draw(f, app, chunks[0]),
@@ -84,13 +80,16 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
         app.sort_column.label(),
         if app.sort_ascending { "↑" } else { "↓" }
     );
-    left_parts.push(Span::styled(sort_info, Style::default().fg(Color::DarkGray)));
+    left_parts.push(Span::styled(
+        sort_info,
+        Style::default().fg(Color::DarkGray),
+    ));
 
     let left = Line::from(left_parts);
     let right = Line::from(Span::styled(right, Style::default().fg(Color::DarkGray)));
 
-    let halves = Layout::horizontal([Constraint::Percentage(70), Constraint::Percentage(30)])
-        .split(area);
+    let halves =
+        Layout::horizontal([Constraint::Percentage(70), Constraint::Percentage(30)]).split(area);
 
     f.render_widget(Paragraph::new(left).style(bar_style), halves[0]);
     f.render_widget(
@@ -124,7 +123,11 @@ fn draw_centered_popup(f: &mut Frame, text: &str, area: Rect) {
     f.render_widget(Clear, popup);
     f.render_widget(
         Paragraph::new(text)
-            .block(Block::default().borders(Borders::ALL).style(Style::default().fg(Color::Yellow)))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .style(Style::default().fg(Color::Yellow)),
+            )
             .alignment(ratatui::layout::Alignment::Center),
         popup,
     );

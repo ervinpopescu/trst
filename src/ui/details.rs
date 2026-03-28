@@ -23,7 +23,11 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         detail_line("Location", &t.download_dir, label_color),
         Line::raw(""),
         detail_line("Size", &util::human_bytes(t.total_size), label_color),
-        detail_line("Downloaded", &util::human_bytes(t.downloaded_ever), label_color),
+        detail_line(
+            "Downloaded",
+            &util::human_bytes(t.downloaded_ever),
+            label_color,
+        ),
         detail_line("Uploaded", &util::human_bytes(t.uploaded_ever), label_color),
         detail_line("Ratio", &format!("{:.2}", t.upload_ratio), label_color),
         detail_line(
@@ -36,7 +40,11 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
             label_color,
         ),
         Line::raw(""),
-        detail_line("Down speed", &util::human_speed(t.rate_download), label_color),
+        detail_line(
+            "Down speed",
+            &util::human_speed(t.rate_download),
+            label_color,
+        ),
         detail_line("Up speed", &util::human_speed(t.rate_upload), label_color),
         detail_line("ETA", &util::human_eta(t.eta), label_color),
         detail_line(
@@ -57,7 +65,11 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         Line::raw(""),
         detail_line(
             "Comment",
-            if t.comment.is_empty() { "—" } else { &t.comment },
+            if t.comment.is_empty() {
+                "—"
+            } else {
+                &t.comment
+            },
             label_color,
         ),
     ];
@@ -115,12 +127,7 @@ fn format_trackers(t: &crate::protocol::Torrent) -> String {
     }
     t.tracker_stats
         .iter()
-        .map(|tr| {
-            format!(
-                "{} (S:{} L:{})",
-                tr.host, tr.seeder_count, tr.leecher_count
-            )
-        })
+        .map(|tr| format!("{} (S:{} L:{})", tr.host, tr.seeder_count, tr.leecher_count))
         .collect::<Vec<_>>()
         .join(", ")
 }
