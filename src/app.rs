@@ -1,9 +1,8 @@
 use std::collections::BTreeSet;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::DefaultTerminal;
-use tokio::time;
 
 use crate::client::TransmissionClient;
 use crate::config::{Bindings, Config, ThemeConfig};
@@ -22,6 +21,7 @@ pub enum View {
 pub enum Confirm {
     Remove,
     DeleteFiles,
+    DeleteFileFromDisk,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -49,6 +49,21 @@ impl SortColumn {
             Self::Eta => Self::Ratio,
             Self::Ratio => Self::Status,
             Self::Status => Self::Queue,
+        }
+    }
+
+    /// Column index in the torrent list header, if visible.
+    pub fn column_index(self) -> Option<usize> {
+        match self {
+            Self::Status => Some(0),
+            Self::Name => Some(1),
+            Self::Size => Some(2),
+            Self::Progress => Some(3),
+            Self::Down => Some(4),
+            Self::Up => Some(5),
+            Self::Eta => Some(6),
+            Self::Ratio => Some(7),
+            Self::Queue => None, // no visible column
         }
     }
 
@@ -98,6 +113,9 @@ pub struct App {
     pub file_cursor: usize,
     pub file_selected: BTreeSet<usize>,
 
+    // help view
+    pub help_scroll: u16,
+
     // status bar
     pub stats: Option<SessionStats>,
     pub free: Option<FreeSpace>,
@@ -128,6 +146,7 @@ impl App {
             detail_torrent: None,
             file_cursor: 0,
             file_selected: BTreeSet::new(),
+            help_scroll: 0,
             stats: None,
             free: None,
             last_error: None,
@@ -136,10 +155,32 @@ impl App {
     }
 
     pub fn filtered_torrents(&self) -> Vec<&Torrent> {
-        let needle = self.filter_input.to_lowercase();
+        let raw = self.filter_input.trim().to_lowercase();
+        if raw.is_empty() {
+            return self.torrents.iter().collect();
+        }
+
+        if let Some(status) = raw.strip_prefix("status:") {
+            let status = status.trim();
+            return self.torrents.iter().filter(|t| {
+                t.status_str().to_lowercase() == status
+            }).collect();
+        }
+
+        if let Some(tracker) = raw.strip_prefix("tracker:") {
+            let tracker = tracker.trim();
+            return self.torrents.iter().filter(|t| {
+                t.tracker_stats.iter().any(|ts| {
+                    ts.host.to_lowercase().contains(tracker)
+                        || ts.announce.to_lowercase().contains(tracker)
+                })
+            }).collect();
+        }
+
+        // default: filter by name
         self.torrents
             .iter()
-            .filter(|t| needle.is_empty() || t.name.to_lowercase().contains(&needle))
+            .filter(|t| t.name.to_lowercase().contains(&raw))
             .collect()
     }
 
@@ -185,8 +226,8 @@ impl App {
         }
     }
 
-    async fn refresh_torrents(&mut self) {
-        match self.client.get_torrents(TORRENT_LIST_FIELDS).await {
+    fn refresh_torrents(&mut self) {
+        match self.client.get_torrents(TORRENT_LIST_FIELDS) {
             Ok(mut list) => {
                 self.sort_torrents(&mut list);
                 self.torrents = list;
@@ -197,11 +238,11 @@ impl App {
         }
     }
 
-    async fn refresh_detail(&mut self) {
+    fn refresh_detail(&mut self) {
         let Some(tid) = self.detail_torrent.as_ref().map(|t| t.id) else {
             return;
         };
-        match self.client.get_torrent(tid, TORRENT_DETAIL_FIELDS).await {
+        match self.client.get_torrent(tid, TORRENT_DETAIL_FIELDS) {
             Ok(Some(t)) => {
                 self.detail_torrent = Some(t);
                 self.clamp_file_cursor();
@@ -214,19 +255,17 @@ impl App {
         }
     }
 
-    async fn refresh_stats(&mut self) {
-        if let Ok(s) = self.client.session_stats().await {
+    fn refresh_stats(&mut self) {
+        if let Ok(s) = self.client.session_stats() {
             self.stats = Some(s);
         }
         if self.default_download_dir.is_none()
-            && let Ok(resp) = self.client.get_torrents(&["id", "downloadDir"]).await
-            && let Some(t) = resp.first().filter(|t| !t.download_dir.is_empty())
+            && let Ok(resp) = self.client.get_torrents(&["id", "downloadDir"])            && let Some(t) = resp.first().filter(|t| !t.download_dir.is_empty())
         {
             self.default_download_dir = Some(t.download_dir.clone());
         }
         if let Some(dir) = &self.default_download_dir
-            && let Ok(f) = self.client.free_space(dir).await
-        {
+            && let Ok(f) = self.client.free_space(dir)        {
             self.free = Some(f);
         }
     }
@@ -249,8 +288,8 @@ impl App {
         });
     }
 
-    fn move_down(&mut self, cursor: &mut usize, selected: &mut BTreeSet<usize>, limit: usize, key: &KeyEvent) {
-        if self.bindings.select_down.matches(key.code, key.modifiers) {
+    fn move_down(cursor: &mut usize, selected: &mut BTreeSet<usize>, limit: usize, selecting: bool) {
+        if selecting {
             selected.insert(*cursor);
             if *cursor + 1 < limit {
                 *cursor += 1;
@@ -261,8 +300,8 @@ impl App {
         }
     }
 
-    fn move_up(&mut self, cursor: &mut usize, selected: &mut BTreeSet<usize>, key: &KeyEvent) {
-        if self.bindings.select_up.matches(key.code, key.modifiers) {
+    fn move_up(cursor: &mut usize, selected: &mut BTreeSet<usize>, selecting: bool) {
+        if selecting {
             selected.insert(*cursor);
             if *cursor > 0 {
                 *cursor -= 1;
@@ -273,9 +312,9 @@ impl App {
         }
     }
 
-    async fn handle_torrent_list_key(&mut self, key: KeyEvent) {
+    fn handle_torrent_list_key(&mut self, key: KeyEvent) {
         if self.adding {
-            self.handle_add_input(key).await;
+            self.handle_add_input(key);
             return;
         }
         if self.filter_active {
@@ -287,7 +326,7 @@ impl App {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
                     let ids = self.target_ids();
                     let delete = matches!(confirm, Confirm::DeleteFiles);
-                    if let Err(e) = self.client.remove(&ids, delete).await {
+                    if let Err(e) = self.client.remove(&ids, delete) {
                         self.last_error = Some(e);
                     }
                     self.selected.clear();
@@ -302,26 +341,26 @@ impl App {
         let (code, mods) = (key.code, key.modifiers);
         let b = &self.bindings;
 
-        if b.quit.matches(code, mods) {
+        let is_down = b.down.matches(code, mods) || code == KeyCode::Down;
+        let is_select_down = b.select_down.matches(code, mods)
+            || (code == KeyCode::Down && mods.contains(KeyModifiers::SHIFT));
+        let is_up = b.up.matches(code, mods) || code == KeyCode::Up;
+        let is_select_up = b.select_up.matches(code, mods)
+            || (code == KeyCode::Up && mods.contains(KeyModifiers::SHIFT));
+
+        if b.quit.matches(code, mods) || code == KeyCode::Esc {
             self.running = false;
         } else if b.help.matches(code, mods) {
             self.prev_view = self.view;
+            self.help_scroll = 0;
             self.view = View::Help;
-        } else if b.down.matches(code, mods) || b.select_down.matches(code, mods) {
-            let mut cursor = self.cursor;
-            let mut selected = self.selected.clone();
-            self.move_down(&mut cursor, &mut selected, visible_len, &key);
-            self.cursor = cursor;
-            self.selected = selected;
-        } else if b.up.matches(code, mods) || b.select_up.matches(code, mods) {
-            let mut cursor = self.cursor;
-            let mut selected = self.selected.clone();
-            self.move_up(&mut cursor, &mut selected, &key);
-            self.cursor = cursor;
-            self.selected = selected;
-        } else if b.top.matches(code, mods) {
+        } else if is_down || is_select_down {
+            Self::move_down(&mut self.cursor, &mut self.selected, visible_len, is_select_down);
+        } else if is_up || is_select_up {
+            Self::move_up(&mut self.cursor, &mut self.selected, is_select_up);
+        } else if b.top.matches(code, mods) || code == KeyCode::Home {
             self.cursor = 0;
-        } else if b.bottom.matches(code, mods) {
+        } else if b.bottom.matches(code, mods) || code == KeyCode::End {
             if visible_len > 0 {
                 self.cursor = visible_len - 1;
             }
@@ -335,7 +374,7 @@ impl App {
             let visible = self.filtered_torrents();
             if let Some(&torrent) = visible.get(self.cursor) {
                 let tid = torrent.id;
-                match self.client.get_torrent(tid, TORRENT_DETAIL_FIELDS).await {
+                match self.client.get_torrent(tid, TORRENT_DETAIL_FIELDS) {
                     Ok(Some(t)) => {
                         self.detail_torrent = Some(t);
                         self.file_cursor = 0;
@@ -350,7 +389,7 @@ impl App {
             let visible = self.filtered_torrents();
             if let Some(&torrent) = visible.get(self.cursor) {
                 let tid = torrent.id;
-                match self.client.get_torrent(tid, TORRENT_DETAIL_FIELDS).await {
+                match self.client.get_torrent(tid, TORRENT_DETAIL_FIELDS) {
                     Ok(Some(t)) => {
                         self.detail_torrent = Some(t);
                         self.view = View::Details;
@@ -371,10 +410,8 @@ impl App {
                     || (self.selected.is_empty()
                         && visible.get(self.cursor).is_some_and(|t| t.is_stopped()));
                 let result = if any_stopped {
-                    self.client.start(&ids).await
-                } else {
-                    self.client.stop(&ids).await
-                };
+                    self.client.start(&ids)                } else {
+                    self.client.stop(&ids)                };
                 if let Err(e) = result {
                     self.last_error = Some(e);
                 }
@@ -393,24 +430,24 @@ impl App {
             self.add_input.clear();
         } else if b.reannounce.matches(code, mods) {
             let ids = self.target_ids();
-            if let Err(e) = self.client.reannounce(&ids).await {
+            if let Err(e) = self.client.reannounce(&ids) {
                 self.last_error = Some(e);
             }
             self.selected.clear();
         } else if b.verify.matches(code, mods) {
             let ids = self.target_ids();
-            if let Err(e) = self.client.verify(&ids).await {
+            if let Err(e) = self.client.verify(&ids) {
                 self.last_error = Some(e);
             }
             self.selected.clear();
         } else if b.queue_up.matches(code, mods) {
             let ids = self.target_ids();
-            if let Err(e) = self.client.queue_move("queue-move-up", &ids).await {
+            if let Err(e) = self.client.queue_move("queue-move-up", &ids) {
                 self.last_error = Some(e);
             }
         } else if b.queue_down.matches(code, mods) {
             let ids = self.target_ids();
-            if let Err(e) = self.client.queue_move("queue-move-down", &ids).await {
+            if let Err(e) = self.client.queue_move("queue-move-down", &ids) {
                 self.last_error = Some(e);
             }
         } else if b.filter.matches(code, mods) {
@@ -440,11 +477,11 @@ impl App {
         }
     }
 
-    async fn handle_add_input(&mut self, key: KeyEvent) {
+    fn handle_add_input(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Enter => {
                 let loc = self.add_input.trim().to_string();
-                if !loc.is_empty() && let Err(e) = self.client.add(&loc).await {
+                if !loc.is_empty() && let Err(e) = self.client.add(&loc) {
                     self.last_error = Some(e);
                 }
                 self.adding = false;
@@ -464,7 +501,18 @@ impl App {
         }
     }
 
-    async fn handle_files_key(&mut self, key: KeyEvent) {
+    fn handle_files_key(&mut self, key: KeyEvent) {
+        if self.confirm == Some(Confirm::DeleteFileFromDisk) {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    self.delete_files_from_disk();
+                    self.confirm = None;
+                }
+                _ => self.confirm = None,
+            }
+            return;
+        }
+
         let file_count = self
             .detail_torrent
             .as_ref()
@@ -474,27 +522,27 @@ impl App {
         let (code, mods) = (key.code, key.modifiers);
         let b = &self.bindings;
 
+        let is_down = b.down.matches(code, mods) || code == KeyCode::Down;
+        let is_select_down = b.select_down.matches(code, mods)
+            || (code == KeyCode::Down && mods.contains(KeyModifiers::SHIFT));
+        let is_up = b.up.matches(code, mods) || code == KeyCode::Up;
+        let is_select_up = b.select_up.matches(code, mods)
+            || (code == KeyCode::Up && mods.contains(KeyModifiers::SHIFT));
+
         if b.back.matches(code, mods) || b.quit.matches(code, mods) {
             self.view = View::TorrentList;
             self.file_selected.clear();
         } else if b.help.matches(code, mods) {
             self.prev_view = self.view;
+            self.help_scroll = 0;
             self.view = View::Help;
-        } else if b.down.matches(code, mods) || b.select_down.matches(code, mods) {
-            let mut cursor = self.file_cursor;
-            let mut selected = self.file_selected.clone();
-            self.move_down(&mut cursor, &mut selected, file_count, &key);
-            self.file_cursor = cursor;
-            self.file_selected = selected;
-        } else if b.up.matches(code, mods) || b.select_up.matches(code, mods) {
-            let mut cursor = self.file_cursor;
-            let mut selected = self.file_selected.clone();
-            self.move_up(&mut cursor, &mut selected, &key);
-            self.file_cursor = cursor;
-            self.file_selected = selected;
-        } else if b.top.matches(code, mods) {
+        } else if is_down || is_select_down {
+            Self::move_down(&mut self.file_cursor, &mut self.file_selected, file_count, is_select_down);
+        } else if is_up || is_select_up {
+            Self::move_up(&mut self.file_cursor, &mut self.file_selected, is_select_up);
+        } else if b.top.matches(code, mods) || code == KeyCode::Home {
             self.file_cursor = 0;
-        } else if b.bottom.matches(code, mods) {
+        } else if b.bottom.matches(code, mods) || code == KeyCode::End {
             if file_count > 0 {
                 self.file_cursor = file_count - 1;
             }
@@ -505,20 +553,21 @@ impl App {
                 self.file_selected.insert(self.file_cursor);
             }
         } else if b.priority_up.matches(code, mods) {
-            self.adjust_file_priority(true).await;
+            self.adjust_file_priority(true);
         } else if b.priority_down.matches(code, mods) {
-            self.adjust_file_priority(false).await;
+            self.adjust_file_priority(false);
         } else if b.toggle_wanted.matches(code, mods) {
-            self.toggle_file_wanted().await;
+            self.toggle_file_wanted();
+        } else if b.delete.matches(code, mods) {
+            self.confirm = Some(Confirm::DeleteFileFromDisk);
         } else if b.reannounce.matches(code, mods)
             && let Some(t) = &self.detail_torrent
-            && let Err(e) = self.client.reannounce(&[t.id]).await
-        {
+            && let Err(e) = self.client.reannounce(&[t.id])        {
             self.last_error = Some(e);
         }
     }
 
-    async fn adjust_file_priority(&mut self, increase: bool) {
+    fn adjust_file_priority(&mut self, increase: bool) {
         let Some(torrent) = &self.detail_torrent else {
             return;
         };
@@ -539,15 +588,15 @@ impl App {
             return;
         }
 
-        if let Err(e) = self.client.set_file_priorities(tid, &changes).await {
+        if let Err(e) = self.client.set_file_priorities(tid, &changes) {
             self.last_error = Some(e);
             return;
         }
         self.file_selected.clear();
-        self.refresh_detail().await;
+        self.refresh_detail();
     }
 
-    async fn toggle_file_wanted(&mut self) {
+    fn toggle_file_wanted(&mut self) {
         let Some(torrent) = &self.detail_torrent else {
             return;
         };
@@ -572,15 +621,40 @@ impl App {
             return;
         }
 
-        if let Err(e) = self.client.set_file_priorities(tid, &changes).await {
+        if let Err(e) = self.client.set_file_priorities(tid, &changes) {
             self.last_error = Some(e);
             return;
         }
         self.file_selected.clear();
-        self.refresh_detail().await;
+        self.refresh_detail();
     }
 
-    async fn handle_details_key(&mut self, key: KeyEvent) {
+    fn delete_files_from_disk(&mut self) {
+        let Some(torrent) = &self.detail_torrent else {
+            return;
+        };
+        let dir = &torrent.download_dir;
+        if dir.is_empty() {
+            self.last_error = Some("unknown download directory".into());
+            return;
+        }
+        let indices = self.file_target_indices();
+        let mut errors = Vec::new();
+        for &i in &indices {
+            if let Some(file) = torrent.files.get(i) {
+                let path = std::path::Path::new(dir).join(&file.name);
+                if let Err(e) = std::fs::remove_file(&path) {
+                    errors.push(format!("{}: {e}", file.name));
+                }
+            }
+        }
+        if !errors.is_empty() {
+            self.last_error = Some(errors.join("; "));
+        }
+        self.file_selected.clear();
+    }
+
+    fn handle_details_key(&mut self, key: KeyEvent) {
         let (code, mods) = (key.code, key.modifiers);
         let b = &self.bindings;
 
@@ -588,6 +662,7 @@ impl App {
             self.view = View::TorrentList;
         } else if b.help.matches(code, mods) {
             self.prev_view = self.view;
+            self.help_scroll = 0;
             self.view = View::Help;
         } else if b.enter.matches(code, mods) {
             self.file_cursor = 0;
@@ -595,30 +670,47 @@ impl App {
             self.view = View::Files;
         } else if b.reannounce.matches(code, mods)
             && let Some(t) = &self.detail_torrent
-            && let Err(e) = self.client.reannounce(&[t.id]).await
-        {
+            && let Err(e) = self.client.reannounce(&[t.id])        {
             self.last_error = Some(e);
         }
     }
 
-    async fn handle_key(&mut self, key: KeyEvent) {
-        match self.view {
-            View::TorrentList => self.handle_torrent_list_key(key).await,
-            View::Files => self.handle_files_key(key).await,
-            View::Details => self.handle_details_key(key).await,
-            View::Help => {
-                self.view = self.prev_view;
-            }
+    fn handle_help_key(&mut self, key: KeyEvent) {
+        let (code, mods) = (key.code, key.modifiers);
+        let b = &self.bindings;
+        if b.quit.matches(code, mods) || b.back.matches(code, mods)
+            || b.help.matches(code, mods) || code == KeyCode::Esc
+        {
+            self.help_scroll = 0;
+            self.view = self.prev_view;
+        } else if b.down.matches(code, mods) || code == KeyCode::Down {
+            self.help_scroll = self.help_scroll.saturating_add(1);
+        } else if b.up.matches(code, mods) || code == KeyCode::Up {
+            self.help_scroll = self.help_scroll.saturating_sub(1);
+        } else if b.top.matches(code, mods) || code == KeyCode::Home {
+            self.help_scroll = 0;
+        } else if code == KeyCode::PageDown {
+            self.help_scroll = self.help_scroll.saturating_add(10);
+        } else if code == KeyCode::PageUp {
+            self.help_scroll = self.help_scroll.saturating_sub(10);
         }
     }
 
-    pub async fn run(mut self, mut terminal: DefaultTerminal) -> std::io::Result<()> {
-        self.refresh_torrents().await;
-        self.refresh_stats().await;
+    fn handle_key(&mut self, key: KeyEvent) {
+        match self.view {
+            View::TorrentList => self.handle_torrent_list_key(key),
+            View::Files => self.handle_files_key(key),
+            View::Details => self.handle_details_key(key),
+            View::Help => self.handle_help_key(key),
+        }
+    }
+
+    pub fn run(mut self, mut terminal: DefaultTerminal) -> std::io::Result<()> {
+        self.refresh_torrents();
+        self.refresh_stats();
 
         let tick_rate = Duration::from_secs(1);
-        let mut tick = time::interval(tick_rate);
-        tick.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+        let mut last_tick = Instant::now();
 
         loop {
             terminal.draw(|f| ui::draw(f, &self))?;
@@ -627,27 +719,22 @@ impl App {
                 break;
             }
 
-            tokio::select! {
-                _ = tick.tick() => {
-                    match self.view {
-                        View::TorrentList => self.refresh_torrents().await,
-                        View::Files | View::Details => self.refresh_detail().await,
-                        View::Help => {}
-                    }
-                    self.refresh_stats().await;
+            let timeout = tick_rate.saturating_sub(last_tick.elapsed());
+            if event::poll(timeout)?
+                && let Event::Key(key) = event::read()?
+                && key.kind == event::KeyEventKind::Press
+            {
+                self.handle_key(key);
+            }
+
+            if last_tick.elapsed() >= tick_rate {
+                match self.view {
+                    View::TorrentList => self.refresh_torrents(),
+                    View::Files | View::Details => self.refresh_detail(),
+                    View::Help => {}
                 }
-                maybe_event = tokio::task::spawn_blocking(|| {
-                    event::poll(Duration::from_millis(100))
-                        .ok()
-                        .filter(|&ready| ready)
-                        .and_then(|_| event::read().ok())
-                }) => {
-                    if let Ok(Some(Event::Key(key))) = maybe_event
-                        && key.kind == event::KeyEventKind::Press
-                    {
-                        self.handle_key(key).await;
-                    }
-                }
+                self.refresh_stats();
+                last_tick = Instant::now();
             }
         }
 

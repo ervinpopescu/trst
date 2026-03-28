@@ -105,6 +105,7 @@ fn draw_confirm(f: &mut Frame, confirm: Confirm, area: Rect) {
     let msg = match confirm {
         Confirm::Remove => "Remove torrent? (y/N)",
         Confirm::DeleteFiles => "Remove torrent AND delete files? (y/N)",
+        Confirm::DeleteFileFromDisk => "Delete selected file(s) from disk? (y/N)",
     };
     draw_centered_popup(f, msg, area);
 }

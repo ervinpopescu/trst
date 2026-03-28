@@ -12,11 +12,24 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
     let th = &app.theme;
     let visible = app.filtered_torrents();
 
-    let header = Row::new([
-        "Status", "Name", "Size", "Progress", "↓", "↑", "ETA", "Ratio", "Peers",
-    ])
-    .style(Style::default().fg(parse_color(&th.header)).add_modifier(Modifier::BOLD))
-    .bottom_margin(0);
+    let sort_idx = app.sort_column.column_index();
+    let sort_arrow = if app.sort_ascending { "▲" } else { "▼" };
+    let labels = ["Status", "Name", "Size", "Progress", "↓", "↑", "ETA", "Ratio", "Peers"];
+    let header_cells: Vec<String> = labels
+        .iter()
+        .enumerate()
+        .map(|(i, &label)| {
+            if sort_idx == Some(i) {
+                format!("{label}{sort_arrow}")
+            } else {
+                label.to_string()
+            }
+        })
+        .collect();
+
+    let header = Row::new(header_cells)
+        .style(Style::default().fg(parse_color(&th.header)).add_modifier(Modifier::BOLD))
+        .bottom_margin(0);
 
     let rows: Vec<Row> = visible
         .iter()

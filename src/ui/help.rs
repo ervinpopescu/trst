@@ -2,7 +2,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap};
 
 use crate::app::App;
 use crate::config::parse_color;
@@ -18,13 +18,13 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         (
             "Torrent list",
             vec![
-                (format_bind(&k.down), "Move down"),
-                (format_bind(&k.up), "Move up"),
-                (format_bind(&k.select_down), "Select down"),
-                (format_bind(&k.select_up), "Select up"),
+                (format_bind(&k.down), "Move down (also ↓)"),
+                (format_bind(&k.up), "Move up (also ↑)"),
+                (format_bind(&k.select_down), "Select down (also shift+↓)"),
+                (format_bind(&k.select_up), "Select up (also shift+↑)"),
                 (format_bind(&k.select_toggle), "Toggle select"),
-                (format_bind(&k.top), "Top"),
-                (format_bind(&k.bottom), "Bottom"),
+                (format_bind(&k.top), "Top (also Home)"),
+                (format_bind(&k.bottom), "Bottom (also End)"),
                 (format_bind(&k.enter), "Open files"),
                 (format_bind(&k.details), "Torrent details"),
                 (format_bind(&k.pause), "Pause / resume"),
@@ -35,7 +35,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
                 (format_bind(&k.verify), "Verify"),
                 (format_bind(&k.queue_up), "Queue up"),
                 (format_bind(&k.queue_down), "Queue down"),
-                (format_bind(&k.filter), "Filter by name"),
+                (format_bind(&k.filter), "Filter (name, status:, tracker:)"),
                 (format_bind(&k.sort), "Cycle sort column"),
                 (format_bind(&k.sort_reverse), "Toggle sort direction"),
                 (format_bind(&k.quit), "Quit"),
@@ -52,6 +52,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
                 (format_bind(&k.priority_up), "Increase priority"),
                 (format_bind(&k.priority_down), "Decrease priority"),
                 (format_bind(&k.toggle_wanted), "Toggle download (wanted/skip)"),
+                (format_bind(&k.delete), "Delete file(s) from disk"),
                 (format_bind(&k.reannounce), "Reannounce"),
                 (format_bind(&k.back), "Back to list"),
             ],
@@ -87,15 +88,28 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::raw(""));
     }
 
+    let line_count = lines.len();
     let paragraph = Paragraph::new(lines)
         .block(
             Block::default()
-                .title(" Keybindings — press any key to close ")
+                .title(" Keybindings — j/k to scroll, q/esc to close ")
                 .borders(Borders::ALL),
         )
-        .wrap(Wrap { trim: false });
+        .wrap(Wrap { trim: false })
+        .scroll((app.help_scroll, 0));
 
     f.render_widget(paragraph, area);
+
+    let visible_height = area.height.saturating_sub(2) as usize; // minus borders
+    if line_count > visible_height {
+        let mut scrollbar_state = ScrollbarState::new(line_count.saturating_sub(visible_height))
+            .position(app.help_scroll as usize);
+        f.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight),
+            area,
+            &mut scrollbar_state,
+        );
+    }
 }
 
 use crate::config::KeyBind;

@@ -265,6 +265,7 @@ pub const TORRENT_LIST_FIELDS: &[&str] = &[
     "leftUntilDone",
     "queuePosition",
     "isFinished",
+    "trackerStats",
 ];
 
 pub const TORRENT_DETAIL_FIELDS: &[&str] = &[

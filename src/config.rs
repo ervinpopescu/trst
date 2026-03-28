@@ -254,18 +254,11 @@ impl KeyBind {
             "delete" | "del" => KeyCode::Delete,
             "insert" | "ins" => KeyCode::Insert,
             s if s.len() == 1 => {
-                let ch = s.chars().next().unwrap();
+                // use original case so "S" stays uppercase
+                let ch = key_part.chars().next().unwrap();
                 KeyCode::Char(ch)
             }
-            _ => {
-                // try original case for single char (e.g. "G", "K")
-                if key_part.len() == 1 {
-                    let ch = key_part.chars().next().unwrap();
-                    KeyCode::Char(ch)
-                } else {
-                    return None;
-                }
-            }
+            _ => return None,
         };
 
         if let KeyCode::Char(c) = code
