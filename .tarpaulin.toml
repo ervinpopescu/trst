@@ -1,0 +1,7 @@
+[tarpaulin]
+ignore_tests = true
+print_full_lines = true
+exclude_files = [
+    "src/main.rs",
+    "src/ui/*",
+]
