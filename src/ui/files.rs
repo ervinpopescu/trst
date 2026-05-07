@@ -94,10 +94,16 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         Constraint::Length(22),
     ];
 
+    let seq_label = if torrent.sequential_download {
+        "seq"
+    } else {
+        "no-seq"
+    };
     let title = format!(
-        " {} — files ({}) [+/- priority, x toggle, q back] ",
+        " {} — files ({}) [{}] [+/- priority, x toggle, q back] ",
         torrent.name,
-        torrent.files.len()
+        torrent.files.len(),
+        seq_label
     );
     let table = Table::new(rows, widths)
         .header(header)

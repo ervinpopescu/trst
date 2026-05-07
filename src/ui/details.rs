@@ -48,6 +48,11 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         detail_line("Up speed", &util::human_speed(t.rate_upload), label_color),
         detail_line("ETA", &util::human_eta(t.eta), label_color),
         detail_line(
+            "Seq",
+            if t.sequential_download { "yes" } else { "no" },
+            label_color,
+        ),
+        detail_line(
             "Peers",
             &format!(
                 "{} connected, {} sending, {} receiving",
