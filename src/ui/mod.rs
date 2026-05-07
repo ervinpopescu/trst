@@ -9,7 +9,7 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
-use crate::app::{App, Confirm, View};
+use crate::app::{App, Confirm, Modal, View};
 use crate::config::parse_color;
 use crate::util;
 
@@ -25,14 +25,11 @@ pub fn draw(f: &mut Frame, app: &App) {
 
     draw_status_bar(f, app, chunks[1]);
 
-    if let Some(confirm) = &app.confirm {
-        draw_confirm(f, *confirm, f.area());
-    }
-    if app.adding {
-        draw_input(f, "Add torrent (magnet/URL):", &app.add_input, f.area());
-    }
-    if app.filter_active {
-        draw_input(f, "Filter:", &app.filter_input, f.area());
+    match &app.modal {
+        Some(Modal::Confirm(c)) => draw_confirm(f, *c, f.area()),
+        Some(Modal::Add(s)) => draw_input(f, "Add torrent (magnet/URL):", s, f.area()),
+        Some(Modal::Filter) => draw_input(f, "Filter:", &app.filter_input, f.area()),
+        None => {}
     }
 }
 
