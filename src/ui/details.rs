@@ -136,3 +136,75 @@ fn format_trackers(t: &crate::protocol::Torrent) -> String {
         .collect::<Vec<_>>()
         .join(", ")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::{Torrent, TrackerStats};
+
+    #[test]
+    fn test_format_timestamp_zero() {
+        assert_eq!(format_timestamp(0), "—");
+        assert_eq!(format_timestamp(-1), "—");
+    }
+
+    #[test]
+    fn test_format_timestamp_epoch() {
+        // Unix epoch + 1 day = 1970-01-02
+        assert_eq!(format_timestamp(86400), "1970-01-02");
+        // 2024-01-01 = 1704067200
+        assert_eq!(format_timestamp(1704067200), "2024-01-01");
+    }
+
+    #[test]
+    fn test_days_to_ymd() {
+        // day 0 = 1970-01-01
+        assert_eq!(days_to_ymd(0), (1970, 1, 1));
+        // day 365 = 1971-01-01
+        assert_eq!(days_to_ymd(365), (1971, 1, 1));
+        // day 19722 = 2023-12-31
+        assert_eq!(days_to_ymd(19722), (2023, 12, 31));
+    }
+
+    #[test]
+    fn test_format_trackers_empty() {
+        let t = Torrent::default();
+        assert_eq!(format_trackers(&t), "—");
+    }
+
+    #[test]
+    fn test_format_trackers_one() {
+        let mut t = Torrent::default();
+        t.tracker_stats.push(TrackerStats {
+            host: "tracker.example.com".into(),
+            seeder_count: 5,
+            leecher_count: 3,
+            ..Default::default()
+        });
+        assert_eq!(
+            format_trackers(&t),
+            "tracker.example.com (S:5 L:3)"
+        );
+    }
+
+    #[test]
+    fn test_format_trackers_multiple() {
+        let mut t = Torrent::default();
+        t.tracker_stats.push(TrackerStats {
+            host: "a.example.com".into(),
+            seeder_count: 1,
+            leecher_count: 0,
+            ..Default::default()
+        });
+        t.tracker_stats.push(TrackerStats {
+            host: "b.example.com".into(),
+            seeder_count: 2,
+            leecher_count: 1,
+            ..Default::default()
+        });
+        assert_eq!(
+            format_trackers(&t),
+            "a.example.com (S:1 L:0), b.example.com (S:2 L:1)"
+        );
+    }
+}

@@ -116,3 +116,30 @@ fn style_for_status(status: i64, th: &crate::config::ThemeConfig) -> Style {
     };
     Style::default().fg(color)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::ThemeConfig;
+
+    #[test]
+    fn test_style_for_status_produces_fg() {
+        let th = ThemeConfig::default();
+        // Just verify each status variant returns a style without panicking
+        for status in [0i64, 1, 2, 3, 4, 5, 6, 99] {
+            let style = style_for_status(status, &th);
+            assert!(style.fg.is_some(), "status {status} should have fg color");
+        }
+    }
+
+    #[test]
+    fn test_style_for_status_distinct_colors() {
+        let th = ThemeConfig::default();
+        let stopped = style_for_status(0, &th);
+        let downloading = style_for_status(4, &th);
+        let seeding = style_for_status(6, &th);
+        // All three should be visually distinct (different fg colors)
+        assert_ne!(stopped.fg, downloading.fg);
+        assert_ne!(downloading.fg, seeding.fg);
+    }
+}
