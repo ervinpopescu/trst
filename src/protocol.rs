@@ -17,6 +17,7 @@ pub struct RpcResponse {
     #[serde(default)]
     pub arguments: serde_json::Value,
     #[serde(default)]
+    #[allow(dead_code)]
     pub tag: Option<u64>,
 }
 
@@ -50,8 +51,10 @@ pub struct Torrent {
     #[serde(default)]
     pub peers_getting_from_us: i64,
     #[serde(default)]
+    #[allow(dead_code)]
     pub seeders: i64,
     #[serde(default)]
+    #[allow(dead_code)]
     pub leechers: i64,
     #[serde(default)]
     pub hash_string: String,
@@ -68,8 +71,10 @@ pub struct Torrent {
     #[serde(default)]
     pub error_string: String,
     #[serde(default)]
+    #[allow(dead_code)]
     pub size_when_done: i64,
     #[serde(default)]
+    #[allow(dead_code)]
     pub left_until_done: i64,
     #[serde(default)]
     pub downloaded_ever: i64,
@@ -78,6 +83,7 @@ pub struct Torrent {
     #[serde(default)]
     pub queue_position: i64,
     #[serde(default)]
+    #[allow(dead_code)]
     pub is_finished: bool,
     #[serde(default)]
     pub sequential_download: bool,
@@ -88,6 +94,7 @@ pub struct Torrent {
     #[serde(default)]
     pub tracker_stats: Vec<TrackerStats>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub peers: Vec<Peer>,
 }
 
@@ -118,6 +125,7 @@ pub struct TorrentFile {
     #[serde(default)]
     pub length: i64,
     #[serde(default)]
+    #[allow(dead_code)]
     pub bytes_completed: i64,
 }
 
@@ -192,8 +200,10 @@ pub struct TrackerStats {
     #[serde(default)]
     pub leecher_count: i64,
     #[serde(default)]
+    #[allow(dead_code)]
     pub last_announce_result: String,
     #[serde(default)]
+    #[allow(dead_code)]
     pub last_announce_time: i64,
 }
 
@@ -201,20 +211,28 @@ pub struct TrackerStats {
 #[serde(rename_all = "camelCase")]
 pub struct Peer {
     #[serde(default)]
+    #[allow(dead_code)]
     pub address: String,
     #[serde(default)]
+    #[allow(dead_code)]
     pub port: i64,
     #[serde(default)]
+    #[allow(dead_code)]
     pub client_name: String,
     #[serde(default)]
+    #[allow(dead_code)]
     pub progress: f64,
     #[serde(default)]
+    #[allow(dead_code)]
     pub rate_to_client: i64,
     #[serde(default)]
+    #[allow(dead_code)]
     pub rate_to_peer: i64,
     #[serde(default)]
+    #[allow(dead_code)]
     pub flag_str: String,
     #[serde(default)]
+    #[allow(dead_code)]
     pub is_encrypted: bool,
 }
 
@@ -224,8 +242,10 @@ pub struct Peer {
 #[serde(rename_all = "camelCase")]
 pub struct SessionStats {
     #[serde(default)]
+    #[allow(dead_code)]
     pub active_torrent_count: i64,
     #[serde(default)]
+    #[allow(dead_code)]
     pub paused_torrent_count: i64,
     #[serde(default)]
     pub torrent_count: i64,
@@ -241,8 +261,10 @@ pub struct FreeSpace {
     #[serde(default)]
     pub size_bytes: i64,
     #[serde(default)]
+    #[allow(dead_code)]
     pub total_size: i64,
     #[serde(default)]
+    #[allow(dead_code)]
     pub path: String,
 }
 
