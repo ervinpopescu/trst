@@ -1,5 +1,6 @@
+use base64::Engine as _;
 use serde_json::{Value, json};
-use std::sync::Mutex;
+use std::cell::RefCell;
 use std::time::Duration;
 
 use crate::protocol::*;
@@ -8,7 +9,7 @@ pub struct TransmissionClient {
     agent: ureq::Agent,
     url: String,
     auth_header: Option<String>,
-    session_id: Mutex<Option<String>>,
+    session_id: RefCell<Option<String>>,
 }
 
 impl TransmissionClient {
@@ -20,13 +21,17 @@ impl TransmissionClient {
             .build()
             .into();
 
-        let auth_header =
-            auth.map(|(u, p)| format!("Basic {}", base64_encode(&format!("{u}:{p}"))));
+        let auth_header = auth.map(|(u, p)| {
+            format!(
+                "Basic {}",
+                base64::engine::general_purpose::STANDARD.encode(format!("{u}:{p}"))
+            )
+        });
         Self {
             agent,
             url: url.to_string(),
             auth_header,
-            session_id: Mutex::new(None),
+            session_id: RefCell::new(None),
         }
     }
 
@@ -48,7 +53,7 @@ impl TransmissionClient {
             if let Some(auth) = &self.auth_header {
                 req = req.header("Authorization", auth);
             }
-            if let Some(sid) = self.session_id.lock().unwrap().as_deref() {
+            if let Some(sid) = self.session_id.borrow().as_deref() {
                 req = req.header("X-Transmission-Session-Id", sid);
             }
 
@@ -57,7 +62,12 @@ impl TransmissionClient {
                     if resp.status() == 409 {
                         if let Some(sid) = resp.headers().get("X-Transmission-Session-Id") {
                             let sid_str = sid.to_str().unwrap_or_default();
-                            *self.session_id.lock().unwrap() = Some(sid_str.to_string());
+                            if sid_str.is_empty()
+                                || sid_str.bytes().any(|b| b < 0x20 || b >= 0x7f)
+                            {
+                                return Err("malformed session ID in response header".into());
+                            }
+                            *self.session_id.borrow_mut() = Some(sid_str.to_string());
                             continue;
                         }
                         return Err("409 without session ID header".into());
@@ -86,17 +96,19 @@ impl TransmissionClient {
 
     pub fn get_torrents(&self, fields: &[&str]) -> Result<Vec<Torrent>, String> {
         let args = json!({ "fields": fields });
-        let resp = self.rpc("torrent-get", Some(args))?;
-        let torrents: Vec<Torrent> = serde_json::from_value(resp.arguments["torrents"].clone())
-            .map_err(|e: serde_json::Error| e.to_string())?;
+        let mut resp = self.rpc("torrent-get", Some(args))?;
+        let val = resp.arguments["torrents"].take();
+        let torrents: Vec<Torrent> =
+            serde_json::from_value(val).map_err(|e: serde_json::Error| e.to_string())?;
         Ok(torrents)
     }
 
     pub fn get_torrent(&self, id: i64, fields: &[&str]) -> Result<Option<Torrent>, String> {
         let args = json!({ "ids": [id], "fields": fields });
-        let resp = self.rpc("torrent-get", Some(args))?;
-        let torrents: Vec<Torrent> = serde_json::from_value(resp.arguments["torrents"].clone())
-            .map_err(|e: serde_json::Error| e.to_string())?;
+        let mut resp = self.rpc("torrent-get", Some(args))?;
+        let val = resp.arguments["torrents"].take();
+        let torrents: Vec<Torrent> =
+            serde_json::from_value(val).map_err(|e: serde_json::Error| e.to_string())?;
         Ok(torrents.into_iter().next())
     }
 
@@ -215,47 +227,3 @@ impl TransmissionClient {
     }
 }
 
-fn base64_encode(input: &str) -> String {
-    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let bytes = input.as_bytes();
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
-        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
-        let triple = (b0 << 16) | (b1 << 8) | b2;
-        out.push(CHARS[((triple >> 18) & 0x3F) as usize] as char);
-        out.push(CHARS[((triple >> 12) & 0x3F) as usize] as char);
-        out.push(if chunk.len() > 1 {
-            CHARS[((triple >> 6) & 0x3F) as usize] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            CHARS[(triple & 0x3F) as usize] as char
-        } else {
-            '='
-        });
-    }
-    out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_base64_encode() {
-        assert_eq!(base64_encode(""), "");
-        assert_eq!(base64_encode("f"), "Zg==");
-        assert_eq!(base64_encode("fo"), "Zm8=");
-        assert_eq!(base64_encode("foo"), "Zm9v");
-        assert_eq!(base64_encode("foob"), "Zm9vYg==");
-        assert_eq!(base64_encode("fooba"), "Zm9vYmE=");
-        assert_eq!(base64_encode("foobar"), "Zm9vYmFy");
-        assert_eq!(
-            base64_encode("user:password123"),
-            "dXNlcjpwYXNzd29yZDEyMw=="
-        );
-    }
-}
