@@ -24,6 +24,12 @@ pub enum Confirm {
     DeleteFileFromDisk,
 }
 
+pub enum Modal {
+    Add(String),
+    Filter,
+    Confirm(Confirm),
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SortColumn {
     Name,
@@ -97,16 +103,12 @@ pub struct App {
     pub sort_column: SortColumn,
     pub sort_ascending: bool,
 
-    // filter
-    pub filter_active: bool,
+    // active modal overlay (add, filter editing, confirm)
+    pub modal: Option<Modal>,
+    // persistent filter string (survives closing the filter modal)
     pub filter_input: String,
-
-    // add torrent
-    pub adding: bool,
-    pub add_input: String,
-
-    // confirm dialog
-    pub confirm: Option<Confirm>,
+    // cached indices into self.torrents matching the current filter
+    filtered_indices: Vec<usize>,
 
     // file view
     pub detail_torrent: Option<Torrent>,
@@ -121,6 +123,7 @@ pub struct App {
     pub free: Option<FreeSpace>,
     pub last_error: Option<String>,
     pub default_download_dir: Option<String>,
+    free_space_tick: u8,
 }
 
 impl App {
@@ -138,11 +141,9 @@ impl App {
             selected: BTreeSet::new(),
             sort_column: SortColumn::Queue,
             sort_ascending: true,
-            filter_active: false,
+            modal: None,
             filter_input: String::new(),
-            adding: false,
-            add_input: String::new(),
-            confirm: None,
+            filtered_indices: Vec::new(),
             detail_torrent: None,
             file_cursor: 0,
             file_selected: BTreeSet::new(),
@@ -151,43 +152,50 @@ impl App {
             free: None,
             last_error: None,
             default_download_dir: None,
+            free_space_tick: 0,
         }
     }
 
     pub fn filtered_torrents(&self) -> Vec<&Torrent> {
+        self.filtered_indices
+            .iter()
+            .filter_map(|&i| self.torrents.get(i))
+            .collect()
+    }
+
+    pub fn rebuild_filter(&mut self) {
         let raw = self.filter_input.trim().to_lowercase();
-        if raw.is_empty() {
-            return self.torrents.iter().collect();
-        }
-
-        if let Some(status) = raw.strip_prefix("status:") {
+        self.filtered_indices = if raw.is_empty() {
+            (0..self.torrents.len()).collect()
+        } else if let Some(status) = raw.strip_prefix("status:") {
             let status = status.trim();
-            return self
-                .torrents
+            self.torrents
                 .iter()
-                .filter(|t| t.status_str().to_lowercase() == status)
-                .collect();
-        }
-
-        if let Some(tracker) = raw.strip_prefix("tracker:") {
-            let tracker = tracker.trim();
-            return self
-                .torrents
+                .enumerate()
+                .filter(|(_, t)| t.status_str().to_lowercase() == status)
+                .map(|(i, _)| i)
+                .collect()
+        } else if let Some(tracker) = raw.strip_prefix("tracker:") {
+            let tracker = tracker.trim().to_string();
+            self.torrents
                 .iter()
-                .filter(|t| {
+                .enumerate()
+                .filter(|(_, t)| {
                     t.tracker_stats.iter().any(|ts| {
-                        ts.host.to_lowercase().contains(tracker)
-                            || ts.announce.to_lowercase().contains(tracker)
+                        ts.host.to_lowercase().contains(&tracker)
+                            || ts.announce.to_lowercase().contains(&tracker)
                     })
                 })
-                .collect();
-        }
-
-        // default: filter by name
-        self.torrents
-            .iter()
-            .filter(|t| t.name.to_lowercase().contains(&raw))
-            .collect()
+                .map(|(i, _)| i)
+                .collect()
+        } else {
+            self.torrents
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| t.name.to_lowercase().contains(&raw))
+                .map(|(i, _)| i)
+                .collect()
+        };
     }
 
     pub fn target_ids(&self) -> Vec<i64> {
@@ -240,6 +248,7 @@ impl App {
             Ok(mut list) => {
                 self.sort_torrents(&mut list);
                 self.torrents = list;
+                self.rebuild_filter();
                 self.clamp_cursor();
                 self.last_error = None;
             }
@@ -274,18 +283,28 @@ impl App {
         {
             self.default_download_dir = Some(t.download_dir.clone());
         }
-        if let Some(dir) = &self.default_download_dir
-            && let Ok(f) = self.client.free_space(dir)
-        {
-            self.free = Some(f);
+        self.free_space_tick = self.free_space_tick.wrapping_add(1);
+        if self.free_space_tick % 5 == 1 {
+            if let Some(dir) = &self.default_download_dir
+                && let Ok(f) = self.client.free_space(dir)
+            {
+                self.free = Some(f);
+            }
         }
     }
 
     fn sort_torrents(&self, list: &mut [Torrent]) {
         let asc = self.sort_ascending;
+        if self.sort_column == SortColumn::Name {
+            list.sort_by_cached_key(|t| t.name.to_lowercase());
+            if !asc {
+                list.reverse();
+            }
+            return;
+        }
         list.sort_by(|a, b| {
             let ord = match self.sort_column {
-                SortColumn::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                SortColumn::Name => unreachable!(),
                 SortColumn::Size => a.total_size.cmp(&b.total_size),
                 SortColumn::Progress => a
                     .percent_done
@@ -335,28 +354,32 @@ impl App {
     }
 
     fn handle_torrent_list_key(&mut self, key: KeyEvent) {
-        if self.adding {
-            self.handle_add_input(key);
-            return;
-        }
-        if self.filter_active {
-            self.handle_filter_input(key);
-            return;
-        }
-        if let Some(confirm) = self.confirm {
-            match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => {
-                    let ids = self.target_ids();
-                    let delete = matches!(confirm, Confirm::DeleteFiles);
-                    if let Err(e) = self.client.remove(&ids, delete) {
-                        self.last_error = Some(e);
-                    }
-                    self.selected.clear();
-                    self.confirm = None;
-                }
-                _ => self.confirm = None,
+        match &self.modal {
+            Some(Modal::Add(_)) => {
+                self.handle_add_input(key);
+                return;
             }
-            return;
+            Some(Modal::Filter) => {
+                self.handle_filter_input(key);
+                return;
+            }
+            Some(Modal::Confirm(confirm @ (Confirm::Remove | Confirm::DeleteFiles))) => {
+                let confirm = *confirm;
+                match key.code {
+                    KeyCode::Char('y') | KeyCode::Char('Y') => {
+                        let ids = self.target_ids();
+                        let delete = matches!(confirm, Confirm::DeleteFiles);
+                        if let Err(e) = self.client.remove(&ids, delete) {
+                            self.last_error = Some(e);
+                        }
+                        self.selected.clear();
+                        self.modal = None;
+                    }
+                    _ => self.modal = None,
+                }
+                return;
+            }
+            _ => {}
         }
 
         let visible_len = self.filtered_torrents().len();
@@ -448,15 +471,14 @@ impl App {
             }
         } else if b.remove.matches(code, mods) {
             if !self.target_ids().is_empty() {
-                self.confirm = Some(Confirm::Remove);
+                self.modal = Some(Modal::Confirm(Confirm::Remove));
             }
         } else if b.delete.matches(code, mods) {
             if !self.target_ids().is_empty() {
-                self.confirm = Some(Confirm::DeleteFiles);
+                self.modal = Some(Modal::Confirm(Confirm::DeleteFiles));
             }
         } else if b.add.matches(code, mods) {
-            self.adding = true;
-            self.add_input.clear();
+            self.modal = Some(Modal::Add(String::new()));
         } else if b.reannounce.matches(code, mods) {
             let ids = self.target_ids();
             if let Err(e) = self.client.reannounce(&ids) {
@@ -480,8 +502,9 @@ impl App {
                 self.last_error = Some(e);
             }
         } else if b.filter.matches(code, mods) {
-            self.filter_active = true;
+            self.modal = Some(Modal::Filter);
             self.filter_input.clear();
+            self.rebuild_filter();
         } else if b.sort.matches(code, mods) {
             self.sort_column = self.sort_column.next();
         } else if b.sort_reverse.matches(code, mods) {
@@ -510,15 +533,17 @@ impl App {
     fn handle_filter_input(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Enter | KeyCode::Esc => {
-                self.filter_active = false;
+                self.modal = None;
                 self.cursor = 0;
                 self.selected.clear();
             }
             KeyCode::Backspace => {
                 self.filter_input.pop();
+                self.rebuild_filter();
             }
             KeyCode::Char(c) => {
                 self.filter_input.push(c);
+                self.rebuild_filter();
             }
             _ => {}
         }
@@ -527,37 +552,43 @@ impl App {
     fn handle_add_input(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Enter => {
-                let loc = self.add_input.trim().to_string();
-                if !loc.is_empty()
-                    && let Err(e) = self.client.add(&loc)
-                {
-                    self.last_error = Some(e);
+                let loc = if let Some(Modal::Add(ref s)) = self.modal {
+                    s.trim().to_string()
+                } else {
+                    return;
+                };
+                self.modal = None;
+                if !loc.is_empty() {
+                    if let Err(e) = self.client.add(&loc) {
+                        self.last_error = Some(e);
+                    }
                 }
-                self.adding = false;
-                self.add_input.clear();
             }
             KeyCode::Esc => {
-                self.adding = false;
-                self.add_input.clear();
+                self.modal = None;
             }
             KeyCode::Backspace => {
-                self.add_input.pop();
+                if let Some(Modal::Add(ref mut s)) = self.modal {
+                    s.pop();
+                }
             }
             KeyCode::Char(c) => {
-                self.add_input.push(c);
+                if let Some(Modal::Add(ref mut s)) = self.modal {
+                    s.push(c);
+                }
             }
             _ => {}
         }
     }
 
     fn handle_files_key(&mut self, key: KeyEvent) {
-        if self.confirm == Some(Confirm::DeleteFileFromDisk) {
+        if matches!(self.modal, Some(Modal::Confirm(Confirm::DeleteFileFromDisk))) {
             match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
                     self.delete_files_from_disk();
-                    self.confirm = None;
+                    self.modal = None;
                 }
-                _ => self.confirm = None,
+                _ => self.modal = None,
             }
             return;
         }
@@ -613,7 +644,7 @@ impl App {
         } else if b.toggle_wanted.matches(code, mods) {
             self.toggle_file_wanted();
         } else if b.delete.matches(code, mods) {
-            self.confirm = Some(Confirm::DeleteFileFromDisk);
+            self.modal = Some(Modal::Confirm(Confirm::DeleteFileFromDisk));
         } else if b.reannounce.matches(code, mods)
             && let Some(t) = &self.detail_torrent
             && let Err(e) = self.client.reannounce(&[t.id])
@@ -701,6 +732,10 @@ impl App {
         let mut errors = Vec::new();
         for &i in &indices {
             if let Some(file) = torrent.files.get(i) {
+                if !is_safe_relative_path(&file.name) {
+                    errors.push(format!("{}: unsafe path rejected", file.name));
+                    continue;
+                }
                 let path = std::path::Path::new(dir).join(&file.name);
                 if let Err(e) = std::fs::remove_file(&path) {
                     errors.push(format!("{}: {e}", file.name));
@@ -804,6 +839,14 @@ impl App {
     }
 }
 
+fn is_safe_relative_path(name: &str) -> bool {
+    use std::path::{Component, Path};
+    !name.is_empty()
+        && Path::new(name)
+            .components()
+            .all(|c| matches!(c, Component::Normal(_)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -842,17 +885,21 @@ mod tests {
         });
 
         app.torrents = vec![t1.clone(), t2.clone()];
+        app.rebuild_filter();
 
         assert_eq!(app.filtered_torrents().len(), 2);
 
         app.filter_input = "ubuntu".into();
+        app.rebuild_filter();
         assert_eq!(app.filtered_torrents().len(), 1);
 
         app.filter_input = "status:seeding".into();
+        app.rebuild_filter();
         assert_eq!(app.filtered_torrents().len(), 1);
         assert_eq!(app.filtered_torrents()[0].name, "debian.iso");
 
         app.filter_input = "tracker:ubuntu.com".into();
+        app.rebuild_filter();
         assert_eq!(app.filtered_torrents().len(), 1);
         assert_eq!(app.filtered_torrents()[0].name, "ubuntu.iso");
     }
@@ -907,6 +954,8 @@ mod tests {
         t2.status = 2;
 
         let mut list = vec![t1, t2];
+        app.torrents = list.clone();
+        app.rebuild_filter();
 
         // Sort by Name, asc
         app.sort_column = SortColumn::Name;
