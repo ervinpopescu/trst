@@ -196,6 +196,7 @@ pub struct KeysConfig {
     pub filter: String,
     pub sort: String,
     pub sort_reverse: String,
+    pub sequential: String,
 
     // file list
     pub priority_up: String,
@@ -231,6 +232,7 @@ impl Default for KeysConfig {
             filter: "/".into(),
             sort: "s".into(),
             sort_reverse: "S".into(),
+            sequential: "e".into(),
 
             priority_up: "+".into(),
             priority_down: "-".into(),
@@ -374,6 +376,7 @@ pub struct Bindings {
     pub filter: KeyBind,
     pub sort: KeyBind,
     pub sort_reverse: KeyBind,
+    pub sequential: KeyBind,
     pub priority_up: KeyBind,
     pub priority_down: KeyBind,
     pub toggle_wanted: KeyBind,
@@ -413,6 +416,7 @@ impl Bindings {
             filter: bind(&k.filter, &defaults.filter),
             sort: bind(&k.sort, &defaults.sort),
             sort_reverse: bind(&k.sort_reverse, &defaults.sort_reverse),
+            sequential: bind(&k.sequential, &defaults.sequential),
             priority_up: bind(&k.priority_up, &defaults.priority_up),
             priority_down: bind(&k.priority_down, &defaults.priority_down),
             toggle_wanted: bind(&k.toggle_wanted, &defaults.toggle_wanted),

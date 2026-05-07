@@ -486,6 +486,24 @@ impl App {
             self.sort_column = self.sort_column.next();
         } else if b.sort_reverse.matches(code, mods) {
             self.sort_ascending = !self.sort_ascending;
+        } else if b.sequential.matches(code, mods) {
+            let ids = self.target_ids();
+            if !ids.is_empty() {
+                let visible = self.filtered_torrents();
+                let any_sequential = self
+                    .selected
+                    .iter()
+                    .filter_map(|&i| visible.get(i))
+                    .any(|t| t.sequential_download)
+                    || (self.selected.is_empty()
+                        && visible
+                            .get(self.cursor)
+                            .is_some_and(|t| t.sequential_download));
+                if let Err(e) = self.client.set_sequential(&ids, !any_sequential) {
+                    self.last_error = Some(e);
+                }
+                self.selected.clear();
+            }
         }
     }
 

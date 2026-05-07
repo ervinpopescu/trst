@@ -80,6 +80,8 @@ pub struct Torrent {
     #[serde(default)]
     pub is_finished: bool,
     #[serde(default)]
+    pub sequential_download: bool,
+    #[serde(default)]
     pub files: Vec<TorrentFile>,
     #[serde(default)]
     pub file_stats: Vec<FileStats>,
@@ -265,6 +267,7 @@ pub const TORRENT_LIST_FIELDS: &[&str] = &[
     "leftUntilDone",
     "queuePosition",
     "isFinished",
+    "sequentialDownload",
     "trackerStats",
 ];
 
@@ -294,6 +297,7 @@ pub const TORRENT_DETAIL_FIELDS: &[&str] = &[
     "uploadedEver",
     "queuePosition",
     "isFinished",
+    "sequentialDownload",
     "files",
     "fileStats",
     "trackerStats",

@@ -190,6 +190,15 @@ impl TransmissionClient {
         Ok(())
     }
 
+    pub fn set_sequential(&self, ids: &[i64], sequential: bool) -> Result<(), String> {
+        let args = json!({
+            "ids": ids,
+            "sequentialDownload": sequential,
+        });
+        self.rpc("torrent-set", Some(args))?;
+        Ok(())
+    }
+
     pub fn queue_move(&self, method: &str, ids: &[i64]) -> Result<(), String> {
         self.torrent_action(method, ids)
     }

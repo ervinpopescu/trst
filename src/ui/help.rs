@@ -40,6 +40,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
                 (format_bind(&k.filter), "Filter (name, status:, tracker:)"),
                 (format_bind(&k.sort), "Cycle sort column"),
                 (format_bind(&k.sort_reverse), "Toggle sort direction"),
+                (format_bind(&k.sequential), "Toggle sequential download"),
                 (format_bind(&k.quit), "Quit"),
             ],
         ),
