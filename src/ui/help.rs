@@ -99,14 +99,15 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
                 .borders(Borders::ALL),
         )
         .wrap(Wrap { trim: false })
-        .scroll((app.help_scroll, 0));
+        .scroll((app.help.unwrap_or(0), 0));
 
     f.render_widget(paragraph, area);
 
     let visible_height = area.height.saturating_sub(2) as usize; // minus borders
     if line_count > visible_height {
+        let scroll = app.help.unwrap_or(0) as usize;
         let mut scrollbar_state = ScrollbarState::new(line_count.saturating_sub(visible_height))
-            .position(app.help_scroll as usize);
+            .position(scroll);
         f.render_stateful_widget(
             Scrollbar::new(ScrollbarOrientation::VerticalRight),
             area,

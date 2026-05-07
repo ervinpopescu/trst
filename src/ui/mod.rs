@@ -20,7 +20,10 @@ pub fn draw(f: &mut Frame, app: &App) {
         View::TorrentList => torrent_list::draw(f, app, chunks[0]),
         View::Files => files::draw(f, app, chunks[0]),
         View::Details => details::draw(f, app, chunks[0]),
-        View::Help => help::draw(f, app, chunks[0]),
+    }
+
+    if app.help.is_some() {
+        help::draw(f, app, chunks[0]);
     }
 
     draw_status_bar(f, app, chunks[1]);

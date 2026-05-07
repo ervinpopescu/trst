@@ -14,7 +14,6 @@ pub enum View {
     TorrentList,
     Files,
     Details,
-    Help,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -93,8 +92,9 @@ pub struct App {
     pub bindings: Bindings,
     pub theme: ThemeConfig,
     pub view: View,
-    pub prev_view: View,
     pub running: bool,
+    // Some(scroll) when help overlay is open; None when closed
+    pub help: Option<u16>,
 
     // torrent list
     pub torrents: Vec<Torrent>,
@@ -115,9 +115,6 @@ pub struct App {
     pub file_cursor: usize,
     pub file_selected: BTreeSet<usize>,
 
-    // help view
-    pub help_scroll: u16,
-
     // status bar
     pub stats: Option<SessionStats>,
     pub free: Option<FreeSpace>,
@@ -134,8 +131,8 @@ impl App {
             bindings,
             theme: config.theme,
             view: View::TorrentList,
-            prev_view: View::TorrentList,
             running: true,
+            help: None,
             torrents: Vec::new(),
             cursor: 0,
             selected: BTreeSet::new(),
@@ -147,7 +144,6 @@ impl App {
             detail_torrent: None,
             file_cursor: 0,
             file_selected: BTreeSet::new(),
-            help_scroll: 0,
             stats: None,
             free: None,
             last_error: None,
@@ -396,9 +392,7 @@ impl App {
         if b.quit.matches(code, mods) || code == KeyCode::Esc {
             self.running = false;
         } else if b.help.matches(code, mods) {
-            self.prev_view = self.view;
-            self.help_scroll = 0;
-            self.view = View::Help;
+            self.help = Some(0);
         } else if is_down || is_select_down {
             Self::move_down(
                 &mut self.cursor,
@@ -613,9 +607,7 @@ impl App {
             self.view = View::TorrentList;
             self.file_selected.clear();
         } else if b.help.matches(code, mods) {
-            self.prev_view = self.view;
-            self.help_scroll = 0;
-            self.view = View::Help;
+            self.help = Some(0);
         } else if is_down || is_select_down {
             Self::move_down(
                 &mut self.file_cursor,
@@ -755,9 +747,7 @@ impl App {
         if b.back.matches(code, mods) || b.quit.matches(code, mods) {
             self.view = View::TorrentList;
         } else if b.help.matches(code, mods) {
-            self.prev_view = self.view;
-            self.help_scroll = 0;
-            self.view = View::Help;
+            self.help = Some(0);
         } else if b.enter.matches(code, mods) {
             self.file_cursor = 0;
             self.file_selected.clear();
@@ -773,32 +763,40 @@ impl App {
     fn handle_help_key(&mut self, key: KeyEvent) {
         let (code, mods) = (key.code, key.modifiers);
         let b = &self.bindings;
-        if b.quit.matches(code, mods)
+        let close = b.quit.matches(code, mods)
             || b.back.matches(code, mods)
             || b.help.matches(code, mods)
-            || code == KeyCode::Esc
-        {
-            self.help_scroll = 0;
-            self.view = self.prev_view;
-        } else if b.down.matches(code, mods) || code == KeyCode::Down {
-            self.help_scroll = self.help_scroll.saturating_add(1);
-        } else if b.up.matches(code, mods) || code == KeyCode::Up {
-            self.help_scroll = self.help_scroll.saturating_sub(1);
-        } else if b.top.matches(code, mods) || code == KeyCode::Home {
-            self.help_scroll = 0;
-        } else if code == KeyCode::PageDown {
-            self.help_scroll = self.help_scroll.saturating_add(10);
-        } else if code == KeyCode::PageUp {
-            self.help_scroll = self.help_scroll.saturating_sub(10);
+            || code == KeyCode::Esc;
+        let dn = b.down.matches(code, mods) || code == KeyCode::Down;
+        let up = b.up.matches(code, mods) || code == KeyCode::Up;
+        let top = b.top.matches(code, mods) || code == KeyCode::Home;
+
+        if close {
+            self.help = None;
+        } else if let Some(scroll) = &mut self.help {
+            if dn {
+                *scroll = scroll.saturating_add(1);
+            } else if up {
+                *scroll = scroll.saturating_sub(1);
+            } else if top {
+                *scroll = 0;
+            } else if code == KeyCode::PageDown {
+                *scroll = scroll.saturating_add(10);
+            } else if code == KeyCode::PageUp {
+                *scroll = scroll.saturating_sub(10);
+            }
         }
     }
 
     fn handle_key(&mut self, key: KeyEvent) {
+        if self.help.is_some() {
+            self.handle_help_key(key);
+            return;
+        }
         match self.view {
             View::TorrentList => self.handle_torrent_list_key(key),
             View::Files => self.handle_files_key(key),
             View::Details => self.handle_details_key(key),
-            View::Help => self.handle_help_key(key),
         }
     }
 
@@ -825,10 +823,11 @@ impl App {
             }
 
             if last_tick.elapsed() >= tick_rate {
-                match self.view {
-                    View::TorrentList => self.refresh_torrents(),
-                    View::Files | View::Details => self.refresh_detail(),
-                    View::Help => {}
+                if self.help.is_none() {
+                    match self.view {
+                        View::TorrentList => self.refresh_torrents(),
+                        View::Files | View::Details => self.refresh_detail(),
+                    }
                 }
                 self.refresh_stats();
                 last_tick = Instant::now();
