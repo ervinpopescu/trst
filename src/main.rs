@@ -29,7 +29,12 @@ fn parse_args() -> Args {
                 });
             }
             "-n" | "--username" => args.username = iter.next(),
-            "-p" | "--password" => args.password = iter.next(),
+            "-p" | "--password" => {
+                args.password = iter.next();
+                eprintln!(
+                    "warning: passing password via -p is visible in process listings and shell history"
+                );
+            }
             "-h" | "--help" => {
                 println!("trst — Transmission remote TUI\n");
                 println!("Usage: trst [HOST[:PORT]] [OPTIONS]\n");
@@ -46,7 +51,7 @@ fn parse_args() -> Args {
             }
             s if !s.starts_with('-') => host = Some(s.to_string()),
             other => {
-                eprintln!("error: unknown argument: {other}");
+                eprintln!("error: unknown argument: {other:?}");
                 eprintln!("try 'trst --help' for usage");
                 std::process::exit(1);
             }
@@ -73,12 +78,31 @@ fn main() -> std::io::Result<()> {
     let config = config::Config::load();
     let args = parse_args();
 
-    let auth = match (&args.username, &args.password) {
-        (Some(u), Some(p)) => Some((u.as_str(), p.as_str())),
+    let url = if !args.url.is_empty() {
+        args.url.clone()
+    } else {
+        config.connection.url.clone().unwrap_or(args.url.clone())
+    };
+
+    let username = args.username.as_deref().or(config.connection.username.as_deref());
+    let password = args.password.as_deref().or(config.connection.password.as_deref());
+
+    let auth = match (username, password) {
+        (Some(u), Some(p)) => Some((u, p)),
         _ => None,
     };
 
-    let client = client::TransmissionClient::new(&args.url, auth);
+    if auth.is_some()
+        && url.starts_with("http://")
+        && !url.contains("localhost")
+        && !url.contains("127.0.0.1")
+        && !url.contains("[::1]")
+    {
+        eprintln!("warning: credentials are being sent over plain HTTP to a remote host");
+        eprintln!("  consider fronting Transmission with an HTTPS reverse proxy");
+    }
+
+    let client = client::TransmissionClient::new(&url, auth);
     let app = app::App::new(client, config);
 
     let terminal = ratatui::init();
