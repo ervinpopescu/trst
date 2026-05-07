@@ -8,8 +8,17 @@ use std::path::PathBuf;
 #[derive(Deserialize, Serialize, Default)]
 #[serde(default)]
 pub struct Config {
+    pub connection: ConnectionConfig,
     pub theme: ThemeConfig,
     pub keys: KeysConfig,
+}
+
+#[derive(Deserialize, Serialize, Default)]
+#[serde(default)]
+pub struct ConnectionConfig {
+    pub url: Option<String>,
+    pub username: Option<String>,
+    pub password: Option<String>,
 }
 
 impl Config {
@@ -30,6 +39,14 @@ impl Config {
                 }
                 if let Ok(toml) = toml::to_string_pretty(&cfg) {
                     let _ = std::fs::write(&path, toml);
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let _ = std::fs::set_permissions(
+                            &path,
+                            std::fs::Permissions::from_mode(0o600),
+                        );
+                    }
                 }
                 cfg
             }
