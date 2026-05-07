@@ -1003,4 +1003,106 @@ mod tests {
         app.sort_torrents(&mut list);
         assert_eq!(list[0].name, "B");
     }
+
+    #[test]
+    fn test_is_safe_relative_path() {
+        assert!(is_safe_relative_path("file.txt"));
+        assert!(is_safe_relative_path("subdir/file.txt"));
+        assert!(!is_safe_relative_path(""));
+        assert!(!is_safe_relative_path("../etc/passwd"));
+        assert!(!is_safe_relative_path("/absolute/path"));
+        assert!(!is_safe_relative_path("./dot/relative"));
+    }
+
+    #[test]
+    fn test_target_ids_cursor() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None),
+            Config::default(),
+        );
+        let mut t1 = Torrent::default();
+        t1.id = 1;
+        let mut t2 = Torrent::default();
+        t2.id = 2;
+        app.torrents = vec![t1, t2];
+        app.rebuild_filter();
+
+        app.cursor = 0;
+        assert_eq!(app.target_ids(), vec![1]);
+
+        app.cursor = 1;
+        assert_eq!(app.target_ids(), vec![2]);
+    }
+
+    #[test]
+    fn test_target_ids_selected() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None),
+            Config::default(),
+        );
+        let mut t1 = Torrent::default();
+        t1.id = 10;
+        let mut t2 = Torrent::default();
+        t2.id = 20;
+        let mut t3 = Torrent::default();
+        t3.id = 30;
+        app.torrents = vec![t1, t2, t3];
+        app.rebuild_filter();
+
+        app.selected.insert(0);
+        app.selected.insert(2);
+        let mut ids = app.target_ids();
+        ids.sort();
+        assert_eq!(ids, vec![10, 30]);
+    }
+
+    #[test]
+    fn test_clamp_cursor() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None),
+            Config::default(),
+        );
+        // Empty list: cursor stays 0
+        app.cursor = 5;
+        app.clamp_cursor();
+        assert_eq!(app.cursor, 0);
+
+        let mut t1 = Torrent::default();
+        t1.id = 1;
+        let mut t2 = Torrent::default();
+        t2.id = 2;
+        app.torrents = vec![t1, t2];
+        app.rebuild_filter();
+
+        app.cursor = 10;
+        app.clamp_cursor();
+        assert_eq!(app.cursor, 1);
+
+        app.cursor = 1;
+        app.clamp_cursor();
+        assert_eq!(app.cursor, 1);
+    }
+
+    #[test]
+    fn test_file_target_indices_cursor() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None),
+            Config::default(),
+        );
+        app.file_cursor = 3;
+        assert_eq!(app.file_target_indices(), vec![3]);
+    }
+
+    #[test]
+    fn test_file_target_indices_selected() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None),
+            Config::default(),
+        );
+        app.file_selected.insert(1);
+        app.file_selected.insert(4);
+        let mut idxs = app.file_target_indices();
+        idxs.sort();
+        assert_eq!(idxs, vec![1, 4]);
+    }
 }
