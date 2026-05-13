@@ -73,6 +73,23 @@ fn parse_args() -> Args {
     args
 }
 
+/// Returns `(username, password)` loaded from the OS keyring for `url`, or `None`.
+fn load_keyring_credentials(url: &str) -> Option<(String, String)> {
+    let entry = keyring::Entry::new("trst", url).ok()?;
+    let secret = entry.get_password().ok()?;
+    let mut parts = secret.splitn(2, '\n');
+    let user = parts.next()?.to_string();
+    let pass = parts.next()?.to_string();
+    Some((user, pass))
+}
+
+/// Saves `username` and `password` to the OS keyring for `url`. Best-effort.
+fn save_keyring_credentials(url: &str, username: &str, password: &str) {
+    if let Ok(entry) = keyring::Entry::new("trst", url) {
+        let _ = entry.set_password(&format!("{username}\n{password}"));
+    }
+}
+
 fn main() -> std::io::Result<()> {
     let config = config::Config::load();
     let args = parse_args();
@@ -83,18 +100,23 @@ fn main() -> std::io::Result<()> {
         config.connection.url.clone().unwrap_or(args.url.clone())
     };
 
-    let username = args
+    let cli_username = args
         .username
         .as_deref()
-        .or(config.connection.username.as_deref());
-    let password = args
+        .or(config.connection.username.as_deref())
+        .map(str::to_string);
+    let cli_password = args
         .password
         .as_deref()
-        .or(config.connection.password.as_deref());
+        .or(config.connection.password.as_deref())
+        .map(str::to_string);
 
-    let auth = match (username, password) {
-        (Some(u), Some(p)) => Some((u, p)),
-        _ => None,
+    let auth: Option<(String, String)> = match (&cli_username, &cli_password) {
+        (Some(u), Some(p)) => {
+            save_keyring_credentials(&url, u, p);
+            Some((u.clone(), p.clone()))
+        }
+        _ => load_keyring_credentials(&url),
     };
 
     if auth.is_some()
@@ -107,7 +129,10 @@ fn main() -> std::io::Result<()> {
         eprintln!("  consider fronting Transmission with an HTTPS reverse proxy");
     }
 
-    let client = client::TransmissionClient::new(&url, auth);
+    let client = client::TransmissionClient::new(
+        &url,
+        auth.as_ref().map(|(u, p)| (u.as_str(), p.as_str())),
+    );
     let app = app::App::new(client, config);
 
     let terminal = ratatui::init();
