@@ -415,4 +415,66 @@ mod tests {
         assert_eq!(FilePriority::Normal.label(), "normal");
         assert_eq!(FilePriority::High.label(), "high");
     }
+
+    #[test]
+    fn test_is_stopped_all_statuses() {
+        let mut t = Torrent::default();
+        for status in 0i64..=6 {
+            t.status = status;
+            assert_eq!(t.is_stopped(), status == 0, "status={status}");
+        }
+        t.status = 99;
+        assert!(!t.is_stopped());
+    }
+
+    #[test]
+    fn test_file_priority_out_of_range() {
+        // priority 2 and -2 should fall back to Normal (wanted=true)
+        for p in [2i64, -2, i64::MAX, i64::MIN] {
+            let stats = FileStats { wanted: true, priority: p, bytes_completed: 0 };
+            assert_eq!(
+                FilePriority::from_stats(&stats),
+                FilePriority::Normal,
+                "priority={p} should be Normal"
+            );
+        }
+        // unwanted overrides priority value
+        for p in [2i64, -2, i64::MAX] {
+            let stats = FileStats { wanted: false, priority: p, bytes_completed: 0 };
+            assert_eq!(FilePriority::from_stats(&stats), FilePriority::Unwanted);
+        }
+    }
+
+    #[test]
+    fn test_torrent_list_fields_contain_required() {
+        let required = ["id", "name", "status", "percentDone", "rateDownload", "rateUpload"];
+        for field in required {
+            assert!(
+                TORRENT_LIST_FIELDS.contains(&field),
+                "TORRENT_LIST_FIELDS missing {field}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_torrent_detail_fields_superset_of_list_fields() {
+        for field in TORRENT_LIST_FIELDS {
+            assert!(
+                TORRENT_DETAIL_FIELDS.contains(field),
+                "TORRENT_DETAIL_FIELDS missing {field} (present in list fields)"
+            );
+        }
+    }
+
+    #[test]
+    fn test_torrent_detail_fields_extras() {
+        // Fields only in detail, not list
+        let detail_only = ["hashString", "downloadDir", "addedDate", "files", "fileStats", "peers"];
+        for field in detail_only {
+            assert!(
+                TORRENT_DETAIL_FIELDS.contains(&field),
+                "TORRENT_DETAIL_FIELDS missing {field}"
+            );
+        }
+    }
 }
