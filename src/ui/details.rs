@@ -77,6 +77,14 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
             },
             label_color,
         ),
+        {
+            let labels_str = if t.labels.is_empty() {
+                "—".to_string()
+            } else {
+                t.labels.join(", ")
+            };
+            detail_line("Labels", &labels_str, label_color)
+        },
     ];
 
     if t.error != 0 {
