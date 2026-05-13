@@ -96,6 +96,8 @@ pub struct Torrent {
     #[serde(default)]
     #[allow(dead_code)]
     pub peers: Vec<Peer>,
+    #[serde(default)]
+    pub labels: Vec<String>,
 }
 
 impl Torrent {
@@ -291,6 +293,7 @@ pub const TORRENT_LIST_FIELDS: &[&str] = &[
     "isFinished",
     "sequentialDownload",
     "trackerStats",
+    "labels",
 ];
 
 pub const TORRENT_DETAIL_FIELDS: &[&str] = &[
@@ -324,6 +327,7 @@ pub const TORRENT_DETAIL_FIELDS: &[&str] = &[
     "fileStats",
     "trackerStats",
     "peers",
+    "labels",
 ];
 
 #[cfg(test)]
@@ -500,5 +504,24 @@ mod tests {
                 "TORRENT_DETAIL_FIELDS missing {field}"
             );
         }
+    }
+
+    #[test]
+    fn test_torrent_labels_default() {
+        let t = Torrent::default();
+        assert!(t.labels.is_empty());
+    }
+
+    #[test]
+    fn test_torrent_labels_deserialize() {
+        let json = r#"{"labels": ["linux", "iso"]}"#;
+        let t: Torrent = serde_json::from_str(json).unwrap();
+        assert_eq!(t.labels, vec!["linux", "iso"]);
+    }
+
+    #[test]
+    fn test_field_arrays_contain_labels() {
+        assert!(TORRENT_LIST_FIELDS.contains(&"labels"));
+        assert!(TORRENT_DETAIL_FIELDS.contains(&"labels"));
     }
 }
