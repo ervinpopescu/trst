@@ -211,6 +211,7 @@ pub struct KeysConfig {
     pub filter: String,
     pub sort: String,
     pub sort_reverse: String,
+    pub edit_labels: String,
     pub sequential: String,
 
     // file list
@@ -247,6 +248,7 @@ impl Default for KeysConfig {
             filter: "/".into(),
             sort: "s".into(),
             sort_reverse: "S".into(),
+            edit_labels: "L".into(),
             sequential: "e".into(),
 
             priority_up: "+".into(),
@@ -391,6 +393,7 @@ pub struct Bindings {
     pub filter: KeyBind,
     pub sort: KeyBind,
     pub sort_reverse: KeyBind,
+    pub edit_labels: KeyBind,
     pub sequential: KeyBind,
     pub priority_up: KeyBind,
     pub priority_down: KeyBind,
@@ -431,6 +434,7 @@ impl Bindings {
             filter: bind(&k.filter, &defaults.filter),
             sort: bind(&k.sort, &defaults.sort),
             sort_reverse: bind(&k.sort_reverse, &defaults.sort_reverse),
+            edit_labels: bind(&k.edit_labels, &defaults.edit_labels),
             sequential: bind(&k.sequential, &defaults.sequential),
             priority_up: bind(&k.priority_up, &defaults.priority_up),
             priority_down: bind(&k.priority_down, &defaults.priority_down),
@@ -504,5 +508,12 @@ mod tests {
         let kb = bind("ctrl+x", "j");
         assert_eq!(kb.code, KeyCode::Char('x'));
         assert_eq!(kb.modifiers, KeyModifiers::CONTROL);
+    }
+
+    #[test]
+    fn test_edit_labels_default_binding() {
+        let defaults = KeysConfig::default();
+        let kb = KeyBind::parse(&defaults.edit_labels).unwrap();
+        assert_eq!(kb.code, crossterm::event::KeyCode::Char('L'));
     }
 }
