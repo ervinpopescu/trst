@@ -28,6 +28,15 @@ pub fn draw(f: &mut Frame, app: &App) {
 
     draw_status_bar(f, app, chunks[1]);
 
+    if app.label_editing {
+        draw_input(
+            f,
+            "Labels (comma-separated):",
+            &app.label_input,
+            f.area(),
+        );
+    }
+
     match &app.modal {
         Some(Modal::Confirm(c)) => draw_confirm(f, *c, f.area()),
         Some(Modal::Add(s)) => draw_input(f, "Add torrent (magnet/URL):", s, f.area()),
