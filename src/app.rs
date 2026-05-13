@@ -861,6 +861,26 @@ mod tests {
     }
 
     #[test]
+    fn test_sort_column_full_cycle() {
+        // Cycling through all variants starting from Name must return to Name
+        let variants = [
+            SortColumn::Name,
+            SortColumn::Size,
+            SortColumn::Progress,
+            SortColumn::Down,
+            SortColumn::Up,
+            SortColumn::Eta,
+            SortColumn::Ratio,
+            SortColumn::Status,
+            SortColumn::Queue,
+        ];
+        let n = variants.len();
+        for (i, &col) in variants.iter().enumerate() {
+            assert_eq!(col.next(), variants[(i + 1) % n]);
+        }
+    }
+
+    #[test]
     fn test_filtering() {
         let mut app = App::new(
             TransmissionClient::new("http://dummy", None),

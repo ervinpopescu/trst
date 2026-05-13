@@ -476,4 +476,35 @@ mod tests {
 
         assert!(KeyBind::parse("invalid_key").is_none());
     }
+
+    #[test]
+    fn test_keybind_matches() {
+        let kb = KeyBind::parse("j").unwrap();
+        assert!(kb.matches(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert!(kb.matches(KeyCode::Char('J'), KeyModifiers::NONE)); // case-insensitive
+        assert!(!kb.matches(KeyCode::Char('k'), KeyModifiers::NONE));
+
+        let ctrl_c = KeyBind::parse("ctrl+c").unwrap();
+        assert!(ctrl_c.matches(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        assert!(!ctrl_c.matches(KeyCode::Char('c'), KeyModifiers::NONE));
+
+        let enter = KeyBind::parse("enter").unwrap();
+        assert!(enter.matches(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(!enter.matches(KeyCode::Esc, KeyModifiers::NONE));
+    }
+
+    #[test]
+    fn test_bind_falls_back_on_invalid() {
+        // An invalid string should silently use the fallback
+        let kb = bind("not_a_real_key_!!!", "j");
+        assert_eq!(kb.code, KeyCode::Char('j'));
+        assert_eq!(kb.modifiers, KeyModifiers::NONE);
+    }
+
+    #[test]
+    fn test_bind_uses_provided_when_valid() {
+        let kb = bind("ctrl+x", "j");
+        assert_eq!(kb.code, KeyCode::Char('x'));
+        assert_eq!(kb.modifiers, KeyModifiers::CONTROL);
+    }
 }
