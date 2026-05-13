@@ -103,6 +103,10 @@ pub struct App {
     pub sort_column: SortColumn,
     pub sort_ascending: bool,
 
+    // label editing
+    pub label_editing: bool,
+    pub label_input: String,
+
     // active modal overlay (add, filter editing, confirm)
     pub modal: Option<Modal>,
     // persistent filter string (survives closing the filter modal)
@@ -138,6 +142,8 @@ impl App {
             selected: BTreeSet::new(),
             sort_column: SortColumn::Queue,
             sort_ascending: true,
+            label_editing: false,
+            label_input: String::new(),
             modal: None,
             filter_input: String::new(),
             filtered_indices: Vec::new(),
@@ -362,6 +368,28 @@ impl App {
                 self.handle_add_input(key);
                 return;
             }
+            _ => {}
+        }
+
+        if self.label_editing {
+            match key.code {
+                KeyCode::Enter => self.handle_label_input(),
+                KeyCode::Esc => {
+                    self.label_editing = false;
+                    self.label_input.clear();
+                }
+                KeyCode::Backspace => {
+                    self.label_input.pop();
+                }
+                KeyCode::Char(c) => {
+                    self.label_input.push(c);
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        match &self.modal {
             Some(Modal::Filter) => {
                 self.handle_filter_input(key);
                 return;
@@ -510,6 +538,12 @@ impl App {
             self.sort_column = self.sort_column.next();
         } else if b.sort_reverse.matches(code, mods) {
             self.sort_ascending = !self.sort_ascending;
+        } else if b.edit_labels.matches(code, mods) {
+            let visible = self.filtered_torrents();
+            if let Some(t) = visible.get(self.cursor) {
+                self.label_input = t.labels.join(", ");
+                self.label_editing = true;
+            }
         } else if b.sequential.matches(code, mods) {
             let ids = self.target_ids();
             if !ids.is_empty() {
@@ -580,6 +614,25 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    fn handle_label_input(&mut self) {
+        let ids = self.target_ids();
+        if !ids.is_empty() {
+            let labels: Vec<String> = self
+                .label_input
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if let Err(e) = self.client.set_labels(&ids, &labels) {
+                self.last_error = Some(e);
+            } else {
+                self.refresh_torrents();
+            }
+        }
+        self.label_editing = false;
+        self.label_input.clear();
     }
 
     fn handle_files_key(&mut self, key: KeyEvent) {
@@ -1161,6 +1214,29 @@ mod tests {
         );
         app.file_cursor = 3;
         assert_eq!(app.file_target_indices(), vec![3]);
+    }
+
+    #[test]
+    fn test_label_editing_state() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None),
+            Config::default(),
+        );
+        let mut t = Torrent::default();
+        t.labels = vec!["foo".into(), "bar".into()];
+        app.torrents = vec![t];
+        app.cursor = 0;
+
+        assert!(!app.label_editing);
+        assert!(app.label_input.is_empty());
+
+        // simulate cancel
+        app.label_input = "foo, bar".into();
+        app.label_editing = true;
+        app.label_editing = false;
+        app.label_input.clear();
+        assert!(!app.label_editing);
+        assert!(app.label_input.is_empty());
     }
 
     #[test]
