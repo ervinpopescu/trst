@@ -184,6 +184,14 @@ impl App {
                 })
                 .map(|(i, _)| i)
                 .collect()
+        } else if let Some(lbl) = raw.strip_prefix("label:") {
+            let lbl = lbl.trim().to_lowercase();
+            self.torrents
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| t.labels.iter().any(|l| l.to_lowercase().contains(&lbl)))
+                .map(|(i, _)| i)
+                .collect()
         } else {
             self.torrents
                 .iter()
@@ -927,6 +935,24 @@ mod tests {
         app.rebuild_filter();
         assert_eq!(app.filtered_torrents().len(), 1);
         assert_eq!(app.filtered_torrents()[0].name, "ubuntu.iso");
+
+        let mut t3 = Torrent::default();
+        t3.name = "arch.iso".into();
+        t3.labels = vec!["linux".into(), "iso".into()];
+        app.torrents = vec![t1.clone(), t2.clone(), t3.clone()];
+
+        app.filter_input = "label:linux".into();
+        app.rebuild_filter();
+        assert_eq!(app.filtered_torrents().len(), 1);
+        assert_eq!(app.filtered_torrents()[0].name, "arch.iso");
+
+        app.filter_input = "label:ISO".into(); // case-insensitive
+        app.rebuild_filter();
+        assert_eq!(app.filtered_torrents().len(), 1);
+
+        app.filter_input = "label:nonexistent".into();
+        app.rebuild_filter();
+        assert_eq!(app.filtered_torrents().len(), 0);
     }
 
     #[test]
