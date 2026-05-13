@@ -215,6 +215,12 @@ impl TransmissionClient {
         self.torrent_action(method, ids)
     }
 
+    pub fn set_labels(&self, ids: &[i64], labels: &[String]) -> Result<(), String> {
+        let args = serde_json::json!({ "ids": ids, "labels": labels });
+        self.rpc("torrent-set", Some(args))?;
+        Ok(())
+    }
+
     pub fn session_stats(&self) -> Result<SessionStats, String> {
         let resp = self.rpc("session-stats", None)?;
         serde_json::from_value(resp.arguments).map_err(|e: serde_json::Error| e.to_string())
