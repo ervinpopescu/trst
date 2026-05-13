@@ -106,8 +106,8 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
     let visible_height = area.height.saturating_sub(2) as usize; // minus borders
     if line_count > visible_height {
         let scroll = app.help.unwrap_or(0) as usize;
-        let mut scrollbar_state = ScrollbarState::new(line_count.saturating_sub(visible_height))
-            .position(scroll);
+        let mut scrollbar_state =
+            ScrollbarState::new(line_count.saturating_sub(visible_height)).position(scroll);
         f.render_stateful_widget(
             Scrollbar::new(ScrollbarOrientation::VerticalRight),
             area,
@@ -174,15 +174,27 @@ mod tests {
 
     #[test]
     fn test_format_bind_plain_char() {
-        assert_eq!(format_bind(&kb(KeyCode::Char('q'), KeyModifiers::NONE)), "q");
-        assert_eq!(format_bind(&kb(KeyCode::Char('j'), KeyModifiers::NONE)), "j");
+        assert_eq!(
+            format_bind(&kb(KeyCode::Char('q'), KeyModifiers::NONE)),
+            "q"
+        );
+        assert_eq!(
+            format_bind(&kb(KeyCode::Char('j'), KeyModifiers::NONE)),
+            "j"
+        );
     }
 
     #[test]
     fn test_format_bind_special_keys() {
-        assert_eq!(format_bind(&kb(KeyCode::Enter, KeyModifiers::NONE)), "enter");
+        assert_eq!(
+            format_bind(&kb(KeyCode::Enter, KeyModifiers::NONE)),
+            "enter"
+        );
         assert_eq!(format_bind(&kb(KeyCode::Esc, KeyModifiers::NONE)), "esc");
-        assert_eq!(format_bind(&kb(KeyCode::Char(' '), KeyModifiers::NONE)), "space");
+        assert_eq!(
+            format_bind(&kb(KeyCode::Char(' '), KeyModifiers::NONE)),
+            "space"
+        );
         assert_eq!(format_bind(&kb(KeyCode::Up, KeyModifiers::NONE)), "up");
         assert_eq!(format_bind(&kb(KeyCode::Down, KeyModifiers::NONE)), "down");
         assert_eq!(format_bind(&kb(KeyCode::Home, KeyModifiers::NONE)), "home");

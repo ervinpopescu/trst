@@ -280,12 +280,11 @@ impl App {
             self.default_download_dir = Some(t.download_dir.clone());
         }
         self.free_space_tick = self.free_space_tick.wrapping_add(1);
-        if self.free_space_tick % 5 == 1 {
-            if let Some(dir) = &self.default_download_dir
-                && let Ok(f) = self.client.free_space(dir)
-            {
-                self.free = Some(f);
-            }
+        if self.free_space_tick % 5 == 1
+            && let Some(dir) = &self.default_download_dir
+            && let Ok(f) = self.client.free_space(dir)
+        {
+            self.free = Some(f);
         }
     }
 
@@ -552,10 +551,10 @@ impl App {
                     return;
                 };
                 self.modal = None;
-                if !loc.is_empty() {
-                    if let Err(e) = self.client.add(&loc) {
-                        self.last_error = Some(e);
-                    }
+                if !loc.is_empty()
+                    && let Err(e) = self.client.add(&loc)
+                {
+                    self.last_error = Some(e);
                 }
             }
             KeyCode::Esc => {
@@ -576,7 +575,10 @@ impl App {
     }
 
     fn handle_files_key(&mut self, key: KeyEvent) {
-        if matches!(self.modal, Some(Modal::Confirm(Confirm::DeleteFileFromDisk))) {
+        if matches!(
+            self.modal,
+            Some(Modal::Confirm(Confirm::DeleteFileFromDisk))
+        ) {
             match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
                     self.delete_files_from_disk();
@@ -887,21 +889,25 @@ mod tests {
             Config::default(),
         );
 
-        let mut t1 = Torrent::default();
-        t1.name = "ubuntu.iso".into();
-        t1.status = 4; // Downloading
-        t1.tracker_stats.push(TrackerStats {
-            host: "tracker.ubuntu.com".into(),
+        let t1 = Torrent {
+            name: "ubuntu.iso".into(),
+            status: 4, // Downloading
+            tracker_stats: vec![TrackerStats {
+                host: "tracker.ubuntu.com".into(),
+                ..Default::default()
+            }],
             ..Default::default()
-        });
+        };
 
-        let mut t2 = Torrent::default();
-        t2.name = "debian.iso".into();
-        t2.status = 6; // Seeding
-        t2.tracker_stats.push(TrackerStats {
-            host: "tracker.debian.org".into(),
+        let t2 = Torrent {
+            name: "debian.iso".into(),
+            status: 6, // Seeding
+            tracker_stats: vec![TrackerStats {
+                host: "tracker.debian.org".into(),
+                ..Default::default()
+            }],
             ..Default::default()
-        });
+        };
 
         app.torrents = vec![t1.clone(), t2.clone()];
         app.rebuild_filter();
@@ -954,23 +960,27 @@ mod tests {
             Config::default(),
         );
 
-        let mut t1 = Torrent::default();
-        t1.name = "B".into();
-        t1.total_size = 100;
-        t1.percent_done = 0.5;
-        t1.rate_download = 50;
-        t1.eta = 10;
-        t1.queue_position = 2;
-        t1.status = 1;
+        let t1 = Torrent {
+            name: "B".into(),
+            total_size: 100,
+            percent_done: 0.5,
+            rate_download: 50,
+            eta: 10,
+            queue_position: 2,
+            status: 1,
+            ..Default::default()
+        };
 
-        let mut t2 = Torrent::default();
-        t2.name = "A".into();
-        t2.total_size = 200;
-        t2.percent_done = 0.8;
-        t2.rate_download = 20;
-        t2.eta = 20;
-        t2.queue_position = 1;
-        t2.status = 2;
+        let t2 = Torrent {
+            name: "A".into(),
+            total_size: 200,
+            percent_done: 0.8,
+            rate_download: 20,
+            eta: 20,
+            queue_position: 1,
+            status: 2,
+            ..Default::default()
+        };
 
         let mut list = vec![t1, t2];
         app.torrents = list.clone();
@@ -1040,10 +1050,14 @@ mod tests {
             TransmissionClient::new("http://dummy", None),
             Config::default(),
         );
-        let mut t1 = Torrent::default();
-        t1.id = 1;
-        let mut t2 = Torrent::default();
-        t2.id = 2;
+        let t1 = Torrent {
+            id: 1,
+            ..Default::default()
+        };
+        let t2 = Torrent {
+            id: 2,
+            ..Default::default()
+        };
         app.torrents = vec![t1, t2];
         app.rebuild_filter();
 
@@ -1060,12 +1074,18 @@ mod tests {
             TransmissionClient::new("http://dummy", None),
             Config::default(),
         );
-        let mut t1 = Torrent::default();
-        t1.id = 10;
-        let mut t2 = Torrent::default();
-        t2.id = 20;
-        let mut t3 = Torrent::default();
-        t3.id = 30;
+        let t1 = Torrent {
+            id: 10,
+            ..Default::default()
+        };
+        let t2 = Torrent {
+            id: 20,
+            ..Default::default()
+        };
+        let t3 = Torrent {
+            id: 30,
+            ..Default::default()
+        };
         app.torrents = vec![t1, t2, t3];
         app.rebuild_filter();
 
@@ -1087,10 +1107,14 @@ mod tests {
         app.clamp_cursor();
         assert_eq!(app.cursor, 0);
 
-        let mut t1 = Torrent::default();
-        t1.id = 1;
-        let mut t2 = Torrent::default();
-        t2.id = 2;
+        let t1 = Torrent {
+            id: 1,
+            ..Default::default()
+        };
+        let t2 = Torrent {
+            id: 2,
+            ..Default::default()
+        };
         app.torrents = vec![t1, t2];
         app.rebuild_filter();
 

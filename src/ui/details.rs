@@ -181,10 +181,7 @@ mod tests {
             leecher_count: 3,
             ..Default::default()
         });
-        assert_eq!(
-            format_trackers(&t),
-            "tracker.example.com (S:5 L:3)"
-        );
+        assert_eq!(format_trackers(&t), "tracker.example.com (S:5 L:3)");
     }
 
     #[test]

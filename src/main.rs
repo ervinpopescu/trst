@@ -83,8 +83,14 @@ fn main() -> std::io::Result<()> {
         config.connection.url.clone().unwrap_or(args.url.clone())
     };
 
-    let username = args.username.as_deref().or(config.connection.username.as_deref());
-    let password = args.password.as_deref().or(config.connection.password.as_deref());
+    let username = args
+        .username
+        .as_deref()
+        .or(config.connection.username.as_deref());
+    let password = args
+        .password
+        .as_deref()
+        .or(config.connection.password.as_deref());
 
     let auth = match (username, password) {
         (Some(u), Some(p)) => Some((u, p)),

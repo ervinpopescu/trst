@@ -63,7 +63,7 @@ impl TransmissionClient {
                         if let Some(sid) = resp.headers().get("X-Transmission-Session-Id") {
                             let sid_str = sid.to_str().unwrap_or_default();
                             if sid_str.is_empty()
-                                || sid_str.bytes().any(|b| b < 0x20 || b >= 0x7f)
+                                || sid_str.bytes().any(|b| !(0x20..0x7f).contains(&b))
                             {
                                 return Err("malformed session ID in response header".into());
                             }
@@ -226,4 +226,3 @@ impl TransmissionClient {
         serde_json::from_value(resp.arguments).map_err(|e: serde_json::Error| e.to_string())
     }
 }
-

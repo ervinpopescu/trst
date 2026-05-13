@@ -332,8 +332,10 @@ mod tests {
 
     #[test]
     fn test_status_str() {
-        let mut t = Torrent::default();
-        t.status = 0;
+        let mut t = Torrent {
+            status: 0,
+            ..Default::default()
+        };
         assert_eq!(t.status_str(), "Stopped");
         assert!(t.is_stopped());
 
@@ -431,7 +433,11 @@ mod tests {
     fn test_file_priority_out_of_range() {
         // priority 2 and -2 should fall back to Normal (wanted=true)
         for p in [2i64, -2, i64::MAX, i64::MIN] {
-            let stats = FileStats { wanted: true, priority: p, bytes_completed: 0 };
+            let stats = FileStats {
+                wanted: true,
+                priority: p,
+                bytes_completed: 0,
+            };
             assert_eq!(
                 FilePriority::from_stats(&stats),
                 FilePriority::Normal,
@@ -440,14 +446,25 @@ mod tests {
         }
         // unwanted overrides priority value
         for p in [2i64, -2, i64::MAX] {
-            let stats = FileStats { wanted: false, priority: p, bytes_completed: 0 };
+            let stats = FileStats {
+                wanted: false,
+                priority: p,
+                bytes_completed: 0,
+            };
             assert_eq!(FilePriority::from_stats(&stats), FilePriority::Unwanted);
         }
     }
 
     #[test]
     fn test_torrent_list_fields_contain_required() {
-        let required = ["id", "name", "status", "percentDone", "rateDownload", "rateUpload"];
+        let required = [
+            "id",
+            "name",
+            "status",
+            "percentDone",
+            "rateDownload",
+            "rateUpload",
+        ];
         for field in required {
             assert!(
                 TORRENT_LIST_FIELDS.contains(&field),
@@ -469,7 +486,14 @@ mod tests {
     #[test]
     fn test_torrent_detail_fields_extras() {
         // Fields only in detail, not list
-        let detail_only = ["hashString", "downloadDir", "addedDate", "files", "fileStats", "peers"];
+        let detail_only = [
+            "hashString",
+            "downloadDir",
+            "addedDate",
+            "files",
+            "fileStats",
+            "peers",
+        ];
         for field in detail_only {
             assert!(
                 TORRENT_DETAIL_FIELDS.contains(&field),
