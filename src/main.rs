@@ -1,7 +1,6 @@
 mod app;
 mod client;
 mod config;
-#[allow(dead_code)]
 mod protocol;
 mod ui;
 mod util;
