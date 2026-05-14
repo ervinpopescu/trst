@@ -37,7 +37,10 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
                 (format_bind(&k.verify), "Verify"),
                 (format_bind(&k.queue_up), "Queue up"),
                 (format_bind(&k.queue_down), "Queue down"),
-                (format_bind(&k.filter), "Filter (name, status:, tracker:, label:)"),
+                (
+                    format_bind(&k.filter),
+                    "Filter (name, status:, tracker:, label:)",
+                ),
                 (format_bind(&k.sort), "Cycle sort column"),
                 (format_bind(&k.sort_reverse), "Toggle sort direction"),
                 (format_bind(&k.edit_labels), "Edit labels"),

@@ -363,12 +363,9 @@ impl App {
     }
 
     fn handle_torrent_list_key(&mut self, key: KeyEvent) {
-        match &self.modal {
-            Some(Modal::Add(_)) => {
-                self.handle_add_input(key);
-                return;
-            }
-            _ => {}
+        if let Some(Modal::Add(_)) = &self.modal {
+            self.handle_add_input(key);
+            return;
         }
 
         if self.label_editing {
@@ -989,9 +986,11 @@ mod tests {
         assert_eq!(app.filtered_torrents().len(), 1);
         assert_eq!(app.filtered_torrents()[0].name, "ubuntu.iso");
 
-        let mut t3 = Torrent::default();
-        t3.name = "arch.iso".into();
-        t3.labels = vec!["linux".into(), "iso".into()];
+        let t3 = Torrent {
+            name: "arch.iso".into(),
+            labels: vec!["linux".into(), "iso".into()],
+            ..Default::default()
+        };
         app.torrents = vec![t1.clone(), t2.clone(), t3.clone()];
 
         app.filter_input = "label:linux".into();
@@ -1215,28 +1214,40 @@ mod tests {
         app.file_cursor = 3;
         assert_eq!(app.file_target_indices(), vec![3]);
     }
-
     #[test]
-    fn test_label_editing_state() {
+    fn test_target_ids_from_labels() {
         let mut app = App::new(
             TransmissionClient::new("http://dummy", None),
             Config::default(),
         );
-        let mut t = Torrent::default();
-        t.labels = vec!["foo".into(), "bar".into()];
+
+        let t = Torrent {
+            id: 10,
+            labels: vec!["foo".into(), "bar".into()],
+            ..Default::default()
+        };
         app.torrents = vec![t];
+        app.rebuild_filter();
+
+        assert!(!app.label_editing);
+        assert!(app.label_input.is_empty());
+
         app.cursor = 0;
+        app.selected.insert(0);
 
-        assert!(!app.label_editing);
-        assert!(app.label_input.is_empty());
-
-        // simulate cancel
-        app.label_input = "foo, bar".into();
+        // Edit labels trigger
+        app.label_input = "foo, bar, baz".into();
         app.label_editing = true;
-        app.label_editing = false;
-        app.label_input.clear();
+
+        // Actually submit the labels
+        app.handle_label_input();
+
+        // Should close label editing
         assert!(!app.label_editing);
         assert!(app.label_input.is_empty());
+
+        // The dummy client will return an error because it's a dummy HTTP agent
+        assert!(app.last_error.is_some());
     }
 
     #[test]

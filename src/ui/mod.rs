@@ -29,12 +29,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     draw_status_bar(f, app, chunks[1]);
 
     if app.label_editing {
-        draw_input(
-            f,
-            "Labels (comma-separated):",
-            &app.label_input,
-            f.area(),
-        );
+        draw_input(f, "Labels (comma-separated):", &app.label_input, f.area());
     }
 
     match &app.modal {
