@@ -8,6 +8,7 @@ use crate::client::TransmissionClient;
 use crate::config::{Bindings, Config, ThemeConfig};
 use crate::protocol::*;
 use crate::ui;
+use crate::util;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum View {
@@ -668,6 +669,17 @@ impl App {
                 }
                 Some(Modal::ChangeLocation(ref mut location)) => {
                     location.push(c);
+                }
+                _ => {}
+            },
+            KeyCode::Tab => match self.modal {
+                Some(Modal::AddLocation {
+                    ref mut location, ..
+                })
+                | Some(Modal::ChangeLocation(ref mut location)) => {
+                    if let Some(completed) = util::autocomplete_path(location) {
+                        *location = completed;
+                    }
                 }
                 _ => {}
             },
@@ -1405,10 +1417,10 @@ mod tests {
 
         assert!(app.modal.is_none());
         assert!(app.last_error.is_some()); // Ureq dummy agent will fail.
-        }
+    }
 
-        #[test]
-        fn test_handle_change_location_transitions() {
+    #[test]
+    fn test_handle_change_location_transitions() {
         use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
         let mut app = App::new(

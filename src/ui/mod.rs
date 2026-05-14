@@ -29,19 +29,39 @@ pub fn draw(f: &mut Frame, app: &App) {
     draw_status_bar(f, app, chunks[1]);
 
     if app.label_editing {
-        draw_input(f, "Labels (comma-separated):", &app.label_input, f.area());
+        draw_input(
+            f,
+            "Labels (comma-separated):",
+            &app.label_input,
+            f.area(),
+            None,
+        );
     }
 
     match &app.modal {
         Some(Modal::Confirm(c)) => draw_confirm(f, *c, f.area()),
-        Some(Modal::AddUrl(s)) => draw_input(f, "Add torrent (magnet/URL):", s, f.area()),
+        Some(Modal::AddUrl(s)) => draw_input(f, "Add torrent (magnet/URL):", s, f.area(), None),
         Some(Modal::AddLocation { location, .. }) => {
-            draw_input(f, "Download location:", location, f.area())
+            let suggestions = util::get_path_suggestions(location);
+            draw_input(
+                f,
+                "Download location:",
+                location,
+                f.area(),
+                Some(suggestions),
+            )
         }
         Some(Modal::ChangeLocation(location)) => {
-            draw_input(f, "Change location to:", location, f.area())
+            let suggestions = util::get_path_suggestions(location);
+            draw_input(
+                f,
+                "Change location to:",
+                location,
+                f.area(),
+                Some(suggestions),
+            )
         }
-        Some(Modal::Filter) => draw_input(f, "Filter:", &app.filter_input, f.area()),
+        Some(Modal::Filter) => draw_input(f, "Filter:", &app.filter_input, f.area(), None),
         None => {}
     }
 }
@@ -119,9 +139,68 @@ fn draw_confirm(f: &mut Frame, confirm: Confirm, area: Rect) {
     draw_centered_popup(f, msg, area);
 }
 
-fn draw_input(f: &mut Frame, label: &str, input: &str, area: Rect) {
-    let text = format!("{label} {input}█");
-    draw_centered_popup(f, &text, area);
+fn draw_input(
+    f: &mut Frame,
+    label: &str,
+    input: &str,
+    area: Rect,
+    completions: Option<Vec<String>>,
+) {
+    let max_input_len = area.width.saturating_sub(label.len() as u16 + 10) as usize;
+
+    let display_input = if input.len() > max_input_len && max_input_len > 3 {
+        format!("...{}", &input[input.len() - (max_input_len - 3)..])
+    } else {
+        input.to_string()
+    };
+
+    let text = format!("{label} {display_input}█");
+
+    let width = (text.len() as u16 + 4).min(area.width);
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + area.height / 2;
+    let popup = Rect::new(x, y, width, 3);
+
+    f.render_widget(Clear, popup);
+    f.render_widget(
+        Paragraph::new(text)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .style(Style::default().fg(Color::Yellow)),
+            )
+            .alignment(ratatui::layout::Alignment::Center),
+        popup,
+    );
+
+    if let Some(mut comps) = completions
+        && !comps.is_empty()
+    {
+        // Cap the number of completions shown
+        comps.truncate(10);
+        let lines: Vec<Line> = comps.into_iter().map(Line::from).collect();
+
+        // Calculate width based on the longest completion string
+        let max_comp_len = lines.iter().map(|l| l.width()).max().unwrap_or(0);
+        let comp_width = (max_comp_len as u16 + 4).min(area.width);
+        let comp_height = lines.len() as u16 + 2; // +2 for borders
+
+        // Center the dropdown below the input box
+        let comp_x = area.x + (area.width.saturating_sub(comp_width)) / 2;
+        let comp_popup = Rect::new(comp_x, y + 3, comp_width, comp_height);
+
+        f.render_widget(Clear, comp_popup);
+        f.render_widget(
+            Paragraph::new(lines)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .style(Style::default().fg(Color::DarkGray)),
+                )
+                .alignment(ratatui::layout::Alignment::Left),
+            comp_popup,
+        );
+    }
 }
 
 fn draw_centered_popup(f: &mut Frame, text: &str, area: Rect) {

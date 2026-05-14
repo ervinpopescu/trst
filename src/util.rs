@@ -52,10 +52,102 @@ pub fn progress_bar(fraction: f64, width: usize) -> String {
     format!("{}{}", "█".repeat(filled), "░".repeat(empty),)
 }
 
-pub fn percent(fraction: f64) -> String {
-    format!("{:.1}%", fraction * 100.0)
+pub fn percent(ratio: f64) -> String {
+    format!("{:.1}%", ratio * 100.0)
 }
 
+/// Returns a list of directory names that match the current input prefix.
+pub fn get_path_suggestions(input: &str) -> Vec<String> {
+    if input.is_empty() {
+        return vec![];
+    }
+
+    let path = std::path::Path::new(input);
+    let (dir, file_prefix) = if input.ends_with('/') {
+        (path, "")
+    } else {
+        (
+            path.parent().unwrap_or_else(|| std::path::Path::new(".")),
+            path.file_name()
+                .unwrap_or_default()
+                .to_str()
+                .unwrap_or_default(),
+        )
+    };
+
+    let dir_str = if dir.as_os_str().is_empty() {
+        "."
+    } else {
+        dir.to_str().unwrap_or(".")
+    };
+
+    let mut matches = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir_str) {
+        for entry in entries.flatten() {
+            if let Ok(name) = entry.file_name().into_string()
+                && name.starts_with(file_prefix)
+                && name != file_prefix
+                && let Ok(file_type) = entry.file_type()
+                && (file_type.is_dir() || file_type.is_symlink())
+            {
+                matches.push(name);
+            }
+        }
+    }
+    matches.sort();
+    matches
+}
+
+/// Attempts to auto-complete a partially typed path by listing the directory contents.
+pub fn autocomplete_path(input: &str) -> Option<String> {
+    if input.is_empty() {
+        return None;
+    }
+
+    let path = std::path::Path::new(input);
+    let (dir, file_prefix) = if input.ends_with('/') {
+        (path, "")
+    } else {
+        (
+            path.parent().unwrap_or_else(|| std::path::Path::new(".")),
+            path.file_name()
+                .unwrap_or_default()
+                .to_str()
+                .unwrap_or_default(),
+        )
+    };
+
+    let matches = get_path_suggestions(input);
+
+    if matches.len() == 1 {
+        // If there's exactly one match, complete it.
+        let mut completed = dir.join(&matches[0]).to_string_lossy().to_string();
+        // If it's a directory, add a trailing slash for convenience.
+        if std::path::Path::new(&completed).is_dir() {
+            completed.push('/');
+        }
+        return Some(completed);
+    } else if matches.len() > 1 {
+        // Find the longest common prefix among multiple matches
+        let mut common_prefix = matches[0].clone();
+        for m in &matches[1..] {
+            let mut new_prefix = String::new();
+            for (c1, c2) in common_prefix.chars().zip(m.chars()) {
+                if c1 == c2 {
+                    new_prefix.push(c1);
+                } else {
+                    break;
+                }
+            }
+            common_prefix = new_prefix;
+        }
+        if common_prefix.len() > file_prefix.len() {
+            return Some(dir.join(common_prefix).to_string_lossy().to_string());
+        }
+    }
+
+    None
+}
 #[cfg(test)]
 mod tests {
     use super::*;
