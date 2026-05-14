@@ -16,5 +16,8 @@ base64 = "0.22.1"
 keyring = { version = "3", features = ["sync-secret-service", "apple-native", "windows-native"] }
 
 [profile.release]
-lto = true
-strip = true
+lto = "fat"            # Maximize link-time optimization (slowest to compile, best performance)
+codegen-units = 1      # Maximize optimizations across translation units (slower to compile)
+strip = true           # Strip symbols from binary (reduces size)
+panic = "abort"        # Disable unwinding (reduces size, slight performance bump)
+opt-level = 3          # Maximum optimization level (default for release, but explicit)
