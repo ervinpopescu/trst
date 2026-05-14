@@ -81,7 +81,7 @@ pub struct Torrent {
     #[serde(default)]
     #[allow(dead_code)]
     pub is_finished: bool,
-    #[serde(default)]
+    #[serde(default, rename = "sequential_download")]
     pub sequential_download: bool,
     #[serde(default)]
     pub files: Vec<TorrentFile>,
@@ -283,7 +283,7 @@ pub const TORRENT_LIST_FIELDS: &[&str] = &[
     "leftUntilDone",
     "queuePosition",
     "isFinished",
-    "sequentialDownload",
+    "sequential_download",
     "trackerStats",
     "labels",
 ];
@@ -314,7 +314,7 @@ pub const TORRENT_DETAIL_FIELDS: &[&str] = &[
     "uploadedEver",
     "queuePosition",
     "isFinished",
-    "sequentialDownload",
+    "sequential_download",
     "files",
     "fileStats",
     "trackerStats",
@@ -515,5 +515,25 @@ mod tests {
     fn test_field_arrays_contain_labels() {
         assert!(TORRENT_LIST_FIELDS.contains(&"labels"));
         assert!(TORRENT_DETAIL_FIELDS.contains(&"labels"));
+    }
+
+    #[test]
+    fn test_torrent_deserialization_sequential_download() {
+        let json = r#"{
+            "id": 42,
+            "name": "Test Torrent",
+            "sequential_download": true
+        }"#;
+        let t: Torrent = serde_json::from_str(json).unwrap();
+        assert_eq!(t.id, 42);
+        assert_eq!(t.name, "Test Torrent");
+        assert!(t.sequential_download);
+
+        let json_false = r#"{
+            "id": 42,
+            "sequential_download": false
+        }"#;
+        let t_false: Torrent = serde_json::from_str(json_false).unwrap();
+        assert!(!t_false.sequential_download);
     }
 }
