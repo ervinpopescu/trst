@@ -3,8 +3,6 @@ use ratatui::style::Color;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-// --- Top-level config ---
-
 #[derive(Deserialize, Serialize, Default)]
 #[serde(default)]
 pub struct Config {
@@ -62,8 +60,6 @@ fn config_path() -> PathBuf {
         .join("trst")
         .join("config.toml")
 }
-
-// --- Theme ---
 
 #[derive(Deserialize, Serialize)]
 #[serde(default)]
@@ -183,16 +179,12 @@ pub fn parse_color(s: &str) -> Color {
     }
 }
 
-// --- Keybindings ---
-
 #[derive(Deserialize, Serialize)]
 #[serde(default)]
 pub struct KeysConfig {
-    // global
     pub quit: String,
     pub help: String,
 
-    // navigation
     pub up: String,
     pub down: String,
     pub top: String,
@@ -201,7 +193,6 @@ pub struct KeysConfig {
     pub select_down: String,
     pub select_toggle: String,
 
-    // torrent list
     pub enter: String,
     pub details: String,
     pub pause: String,
@@ -218,7 +209,6 @@ pub struct KeysConfig {
     pub edit_labels: String,
     pub sequential: String,
 
-    // file list
     pub priority_up: String,
     pub priority_down: String,
     pub toggle_wanted: String,
@@ -263,7 +253,6 @@ impl Default for KeysConfig {
     }
 }
 
-/// Parsed key binding ready for matching against crossterm events.
 #[derive(Clone, Copy)]
 pub struct KeyBind {
     pub code: KeyCode,
@@ -274,7 +263,6 @@ impl KeyBind {
     pub fn parse(s: &str) -> Option<Self> {
         let s = s.trim();
 
-        // split modifiers from the key, handling "+" as a literal key
         let mut modifiers = KeyModifiers::empty();
         let key_part = Self::split_modifiers(s, &mut modifiers)?;
 
@@ -295,7 +283,6 @@ impl KeyBind {
             "delete" | "del" => KeyCode::Delete,
             "insert" | "ins" => KeyCode::Insert,
             s if s.len() == 1 => {
-                // use original case so "S" stays uppercase
                 let ch = key_part.chars().next().unwrap();
                 KeyCode::Char(ch)
             }
@@ -312,7 +299,6 @@ impl KeyBind {
     }
 
     pub fn matches(&self, code: KeyCode, modifiers: KeyModifiers) -> bool {
-        // for char keys, compare case-insensitively and check shift via modifiers
         match (self.code, code) {
             (KeyCode::Char(a), KeyCode::Char(b)) => {
                 a.eq_ignore_ascii_case(&b) && self.modifiers == modifiers
@@ -320,17 +306,12 @@ impl KeyBind {
             _ => self.code == code && modifiers.contains(self.modifiers),
         }
     }
-    /// Split "ctrl+shift+x" into modifiers + key part.
-    /// Handles "+" as a literal key: bare "+" or "shift++" work correctly.
+
     fn split_modifiers<'a>(s: &'a str, modifiers: &mut KeyModifiers) -> Option<&'a str> {
-        // no "+" at all, or the string is literally "+"
         if !s.contains('+') || s == "+" {
             return Some(s);
         }
 
-        // find the last "+" that has a known modifier before it
-        // e.g. "shift++" → modifier "shift", key "+"
-        // e.g. "ctrl+a" → modifier "ctrl", key "a"
         let mut last_split = None;
         let mut pos = 0;
         for (i, part) in s.split('+').enumerate() {
@@ -338,7 +319,6 @@ impl KeyBind {
                 pos = part.len() + 1;
                 continue;
             }
-            // check if everything before this "+" is valid modifiers
             let prefix = &s[..pos - 1];
             if prefix.split('+').all(|p| {
                 matches!(
@@ -364,7 +344,6 @@ impl KeyBind {
             }
         }
 
-        // key part can be empty if the key is "+" itself (e.g. "shift++")
         if key_str.is_empty() {
             Some("+")
         } else {
@@ -373,7 +352,6 @@ impl KeyBind {
     }
 }
 
-/// All keybindings parsed and ready to match.
 pub struct Bindings {
     pub quit: KeyBind,
     pub help: KeyBind,
@@ -487,7 +465,7 @@ mod tests {
     fn test_keybind_matches() {
         let kb = KeyBind::parse("j").unwrap();
         assert!(kb.matches(KeyCode::Char('j'), KeyModifiers::NONE));
-        assert!(kb.matches(KeyCode::Char('J'), KeyModifiers::NONE)); // case-insensitive
+        assert!(kb.matches(KeyCode::Char('J'), KeyModifiers::NONE));
         assert!(!kb.matches(KeyCode::Char('k'), KeyModifiers::NONE));
 
         let ctrl_c = KeyBind::parse("ctrl+c").unwrap();
@@ -501,7 +479,6 @@ mod tests {
 
     #[test]
     fn test_bind_falls_back_on_invalid() {
-        // An invalid string should silently use the fallback
         let kb = bind("not_a_real_key_!!!", "j");
         assert_eq!(kb.code, KeyCode::Char('j'));
         assert_eq!(kb.modifiers, KeyModifiers::NONE);
