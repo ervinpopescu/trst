@@ -34,19 +34,23 @@ impl Config {
             },
             Err(_) => {
                 let cfg = Self::default();
-                if let Some(parent) = path.parent() {
-                    let _ = std::fs::create_dir_all(parent);
-                }
-                if let Ok(toml) = toml::to_string_pretty(&cfg) {
-                    let _ = std::fs::write(&path, toml);
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::fs::PermissionsExt;
-                        let _ =
-                            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-                    }
-                }
+                cfg.save();
                 cfg
+            }
+        }
+    }
+
+    pub fn save(&self) {
+        let path = config_path();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(toml) = toml::to_string_pretty(self) {
+            let _ = std::fs::write(&path, toml);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
             }
         }
     }

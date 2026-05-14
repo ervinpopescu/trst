@@ -83,15 +83,25 @@ fn load_keyring_credentials(url: &str) -> Option<(String, String)> {
     Some((user, pass))
 }
 
-/// Saves `username` and `password` to the OS keyring for `url`. Best-effort.
-fn save_keyring_credentials(url: &str, username: &str, password: &str) {
-    if let Ok(entry) = keyring::Entry::new("trst", url) {
-        let _ = entry.set_password(&format!("{username}\n{password}"));
+/// Saves `username` and `password` to the OS keyring for `url`. Returns true if successful.
+fn save_keyring_credentials(url: &str, username: &str, password: &str) -> bool {
+    match keyring::Entry::new("trst", url) {
+        Ok(entry) => match entry.set_password(&format!("{username}\n{password}")) {
+            Ok(_) => true,
+            Err(e) => {
+                eprintln!("warning: failed to save credentials to keyring: {e}");
+                false
+            }
+        },
+        Err(e) => {
+            eprintln!("warning: failed to access keyring: {e}");
+            false
+        }
     }
 }
 
 fn main() -> std::io::Result<()> {
-    let config = config::Config::load();
+    let mut config = config::Config::load();
     let args = parse_args();
 
     let url = if !args.url.is_empty() {
@@ -113,10 +123,35 @@ fn main() -> std::io::Result<()> {
 
     let auth: Option<(String, String)> = match (&cli_username, &cli_password) {
         (Some(u), Some(p)) => {
-            save_keyring_credentials(&url, u, p);
+            let saved = save_keyring_credentials(&url, u, p);
+
+            // If it was provided on the CLI, we ALWAYS save it to config to be safe
+            if args.username.is_some() || args.password.is_some() || !saved {
+                if !saved {
+                    eprintln!(
+                        "info: keyring save failed, falling back to saving credentials in config file"
+                    );
+                }
+                config.connection.url = Some(url.clone());
+                config.connection.username = Some(u.clone());
+                config.connection.password = Some(p.clone());
+                config.save();
+            }
             Some((u.clone(), p.clone()))
         }
-        _ => load_keyring_credentials(&url),
+        _ => {
+            // First try to load from the keyring
+            load_keyring_credentials(&url).or_else(|| {
+                // If keyring is empty, check if we have them in the config file
+                if let (Some(u), Some(p)) =
+                    (&config.connection.username, &config.connection.password)
+                {
+                    Some((u.clone(), p.clone()))
+                } else {
+                    None
+                }
+            })
+        }
     };
 
     if auth.is_some()
