@@ -38,6 +38,9 @@ pub fn draw(f: &mut Frame, app: &App) {
         Some(Modal::AddLocation { location, .. }) => {
             draw_input(f, "Download location:", location, f.area())
         }
+        Some(Modal::ChangeLocation(location)) => {
+            draw_input(f, "Change location to:", location, f.area())
+        }
         Some(Modal::Filter) => draw_input(f, "Filter:", &app.filter_input, f.area()),
         None => {}
     }
