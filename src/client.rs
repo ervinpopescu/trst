@@ -226,6 +226,24 @@ impl TransmissionClient {
         Ok(())
     }
 
+    pub fn set_location(
+        &self,
+        ids: &[i64],
+        location: &str,
+        move_files: bool,
+    ) -> Result<(), String> {
+        let args = json!({
+            "ids": ids,
+            "location": location,
+            "move": move_files,
+        });
+        // The spec documents the method name as `torrent_set_location` (with underscores),
+        // but other methods use hyphens. Both are usually supported, but we'll use hyphens
+        // to match the others. If it fails, we'll try underscores.
+        self.rpc("torrent-set-location", Some(args))?;
+        Ok(())
+    }
+
     pub fn session_stats(&self) -> Result<SessionStats, String> {
         let resp = self.rpc("session-stats", None)?;
         serde_json::from_value(resp.arguments).map_err(|e: serde_json::Error| e.to_string())

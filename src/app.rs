@@ -26,6 +26,7 @@ pub enum Confirm {
 pub enum Modal {
     AddUrl(String),
     AddLocation { url: String, location: String },
+    ChangeLocation(String),
     Filter,
     Confirm(Confirm),
 }
@@ -365,7 +366,9 @@ impl App {
 
     fn handle_torrent_list_key(&mut self, key: KeyEvent) {
         match &self.modal {
-            Some(Modal::AddUrl(_)) | Some(Modal::AddLocation { .. }) => {
+            Some(Modal::AddUrl(_))
+            | Some(Modal::AddLocation { .. })
+            | Some(Modal::ChangeLocation(_)) => {
                 self.handle_add_input(key);
                 return;
             }
@@ -509,6 +512,18 @@ impl App {
             }
         } else if b.add.matches(code, mods) {
             self.modal = Some(Modal::AddUrl(String::new()));
+        } else if b.change_location.matches(code, mods) {
+            if !self.target_ids().is_empty() {
+                // If only one torrent is selected, pre-fill its current location.
+                let mut initial_loc = String::new();
+                let ids = self.target_ids();
+                if ids.len() == 1
+                    && let Some(t) = self.torrents.iter().find(|t| t.id == ids[0])
+                {
+                    initial_loc = t.download_dir.clone();
+                }
+                self.modal = Some(Modal::ChangeLocation(initial_loc));
+            }
         } else if b.reannounce.matches(code, mods) {
             let ids = self.target_ids();
             if let Err(e) = self.client.reannounce(&ids) {
@@ -611,6 +626,18 @@ impl App {
                     }
                     self.modal = None;
                 }
+                Some(Modal::ChangeLocation(location)) => {
+                    let location = location.trim().to_string();
+                    if !location.is_empty() {
+                        let ids = self.target_ids();
+                        // we move the files by default when changing location from UI
+                        if let Err(e) = self.client.set_location(&ids, &location, true) {
+                            self.last_error = Some(e);
+                        }
+                        self.selected.clear();
+                    }
+                    self.modal = None;
+                }
                 _ => self.modal = None,
             },
             KeyCode::Esc => {
@@ -625,6 +652,9 @@ impl App {
                 }) => {
                     location.pop();
                 }
+                Some(Modal::ChangeLocation(ref mut location)) => {
+                    location.pop();
+                }
                 _ => {}
             },
             KeyCode::Char(c) => match self.modal {
@@ -634,6 +664,9 @@ impl App {
                 Some(Modal::AddLocation {
                     ref mut location, ..
                 }) => {
+                    location.push(c);
+                }
+                Some(Modal::ChangeLocation(ref mut location)) => {
                     location.push(c);
                 }
                 _ => {}
@@ -1372,5 +1405,77 @@ mod tests {
 
         assert!(app.modal.is_none());
         assert!(app.last_error.is_some()); // Ureq dummy agent will fail.
+        }
+
+        #[test]
+        fn test_handle_change_location_transitions() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None),
+            Config::default(),
+        );
+
+        // State 1: Enter ChangeLocation modal
+        app.modal = Some(Modal::ChangeLocation(String::new()));
+
+        // Type "/new_path"
+        for c in "/new_path".chars() {
+            app.handle_add_input(KeyEvent {
+                code: KeyCode::Char(c),
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                state: KeyEventState::empty(),
+            });
+        }
+
+        match &app.modal {
+            Some(Modal::ChangeLocation(s)) => assert_eq!(s, "/new_path"),
+            _ => panic!("Expected ChangeLocation"),
+        }
+
+        // Press Enter. Should close modal and set last error (due to dummy client)
+        app.handle_add_input(KeyEvent {
+            code: KeyCode::Enter,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        });
+
+        assert!(app.modal.is_none());
+        assert!(app.last_error.is_some());
+    }
+
+    #[test]
+    fn test_handle_torrent_list_key_change_location() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None),
+            Config::default(),
+        );
+
+        app.torrents.push(crate::protocol::Torrent {
+            id: 1,
+            download_dir: "/default/path".to_string(),
+            ..Default::default()
+        });
+        app.rebuild_filter();
+
+        // select the torrent
+        app.cursor = 0;
+
+        // trigger change_location key ('m' is default)
+        let key = KeyEvent {
+            code: KeyCode::Char('m'),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        };
+        app.handle_torrent_list_key(key);
+
+        match &app.modal {
+            Some(Modal::ChangeLocation(loc)) => assert_eq!(loc, "/default/path"),
+            _ => panic!("Expected ChangeLocation modal with prefilled path"),
+        }
     }
 }
