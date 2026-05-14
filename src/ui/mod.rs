@@ -16,14 +16,14 @@ use crate::util;
 pub fn draw(f: &mut Frame, app: &App) {
     let chunks = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(f.area());
 
-    match app.view {
-        View::TorrentList => torrent_list::draw(f, app, chunks[0]),
-        View::Files => files::draw(f, app, chunks[0]),
-        View::Details => details::draw(f, app, chunks[0]),
-    }
-
     if app.help.is_some() {
         help::draw(f, app, chunks[0]);
+    } else {
+        match app.view {
+            View::TorrentList => torrent_list::draw(f, app, chunks[0]),
+            View::Files => files::draw(f, app, chunks[0]),
+            View::Details => details::draw(f, app, chunks[0]),
+        }
     }
 
     draw_status_bar(f, app, chunks[1]);
@@ -34,7 +34,10 @@ pub fn draw(f: &mut Frame, app: &App) {
 
     match &app.modal {
         Some(Modal::Confirm(c)) => draw_confirm(f, *c, f.area()),
-        Some(Modal::Add(s)) => draw_input(f, "Add torrent (magnet/URL):", s, f.area()),
+        Some(Modal::AddUrl(s)) => draw_input(f, "Add torrent (magnet/URL):", s, f.area()),
+        Some(Modal::AddLocation { location, .. }) => {
+            draw_input(f, "Download location:", location, f.area())
+        }
         Some(Modal::Filter) => draw_input(f, "Filter:", &app.filter_input, f.area()),
         None => {}
     }

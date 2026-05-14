@@ -143,8 +143,13 @@ impl TransmissionClient {
         Ok(())
     }
 
-    pub fn add(&self, location: &str) -> Result<(), String> {
-        let args = json!({ "filename": location });
+    pub fn add(&self, location: &str, download_dir: Option<&str>) -> Result<(), String> {
+        let mut args = json!({ "filename": location });
+        if let Some(dir) = download_dir
+            && let Some(obj) = args.as_object_mut()
+        {
+            obj.insert("download-dir".to_string(), json!(dir));
+        }
         self.rpc("torrent-add", Some(args))?;
         Ok(())
     }
