@@ -24,7 +24,8 @@ pub enum Confirm {
 }
 
 pub enum Modal {
-    Add(String),
+    AddUrl(String),
+    AddLocation { url: String, location: String },
     Filter,
     Confirm(Confirm),
 }
@@ -363,9 +364,12 @@ impl App {
     }
 
     fn handle_torrent_list_key(&mut self, key: KeyEvent) {
-        if let Some(Modal::Add(_)) = &self.modal {
-            self.handle_add_input(key);
-            return;
+        match &self.modal {
+            Some(Modal::AddUrl(_)) | Some(Modal::AddLocation { .. }) => {
+                self.handle_add_input(key);
+                return;
+            }
+            _ => {}
         }
 
         if self.label_editing {
@@ -504,7 +508,7 @@ impl App {
                 self.modal = Some(Modal::Confirm(Confirm::DeleteFiles));
             }
         } else if b.add.matches(code, mods) {
-            self.modal = Some(Modal::Add(String::new()));
+            self.modal = Some(Modal::AddUrl(String::new()));
         } else if b.reannounce.matches(code, mods) {
             let ids = self.target_ids();
             if let Err(e) = self.client.reannounce(&ids) {
@@ -583,32 +587,57 @@ impl App {
 
     fn handle_add_input(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Enter => {
-                let loc = if let Some(Modal::Add(ref s)) = self.modal {
-                    s.trim().to_string()
-                } else {
-                    return;
-                };
-                self.modal = None;
-                if !loc.is_empty()
-                    && let Err(e) = self.client.add(&loc)
-                {
-                    self.last_error = Some(e);
+            KeyCode::Enter => match self.modal.take() {
+                Some(Modal::AddUrl(s)) => {
+                    let url = s.trim().to_string();
+                    if url.is_empty() {
+                        self.modal = None;
+                    } else {
+                        self.modal = Some(Modal::AddLocation {
+                            url,
+                            location: self.default_download_dir.clone().unwrap_or_default(),
+                        });
+                    }
                 }
-            }
+                Some(Modal::AddLocation { url, location }) => {
+                    let location = location.trim().to_string();
+                    let dir = if location.is_empty() {
+                        None
+                    } else {
+                        Some(location.as_str())
+                    };
+                    if let Err(e) = self.client.add(&url, dir) {
+                        self.last_error = Some(e);
+                    }
+                    self.modal = None;
+                }
+                _ => self.modal = None,
+            },
             KeyCode::Esc => {
                 self.modal = None;
             }
-            KeyCode::Backspace => {
-                if let Some(Modal::Add(ref mut s)) = self.modal {
+            KeyCode::Backspace => match self.modal {
+                Some(Modal::AddUrl(ref mut s)) => {
                     s.pop();
                 }
-            }
-            KeyCode::Char(c) => {
-                if let Some(Modal::Add(ref mut s)) = self.modal {
+                Some(Modal::AddLocation {
+                    ref mut location, ..
+                }) => {
+                    location.pop();
+                }
+                _ => {}
+            },
+            KeyCode::Char(c) => match self.modal {
+                Some(Modal::AddUrl(ref mut s)) => {
                     s.push(c);
                 }
-            }
+                Some(Modal::AddLocation {
+                    ref mut location, ..
+                }) => {
+                    location.push(c);
+                }
+                _ => {}
+            },
             _ => {}
         }
     }
@@ -1261,5 +1290,87 @@ mod tests {
         let mut idxs = app.file_target_indices();
         idxs.sort();
         assert_eq!(idxs, vec![1, 4]);
+    }
+
+    #[test]
+    fn test_handle_add_input_transitions() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None),
+            Config::default(),
+        );
+
+        // State 1: Enter AddUrl modal
+        app.modal = Some(Modal::AddUrl(String::new()));
+
+        // Type "http://test"
+        for c in "http://test".chars() {
+            app.handle_add_input(KeyEvent {
+                code: KeyCode::Char(c),
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                state: KeyEventState::empty(),
+            });
+        }
+
+        match &app.modal {
+            Some(Modal::AddUrl(s)) => assert_eq!(s, "http://test"),
+            _ => panic!("Expected AddUrl"),
+        }
+
+        // Press Enter to go to AddLocation
+        app.handle_add_input(KeyEvent {
+            code: KeyCode::Enter,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        });
+
+        match &app.modal {
+            Some(Modal::AddLocation { url, location }) => {
+                assert_eq!(url, "http://test");
+                assert_eq!(location, ""); // Default is empty here
+            }
+            _ => panic!("Expected AddLocation"),
+        }
+
+        // Type "/downloads"
+        for c in "/downloads".chars() {
+            app.handle_add_input(KeyEvent {
+                code: KeyCode::Char(c),
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                state: KeyEventState::empty(),
+            });
+        }
+
+        // Backspace once
+        app.handle_add_input(KeyEvent {
+            code: KeyCode::Backspace,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        });
+
+        match &app.modal {
+            Some(Modal::AddLocation { url, location }) => {
+                assert_eq!(url, "http://test");
+                assert_eq!(location, "/download");
+            }
+            _ => panic!("Expected AddLocation with /download"),
+        }
+
+        // Press Enter. In a real environment, this sends an RPC. Since client has dummy agent,
+        // it fails with a string error, setting last_error and clearing modal.
+        app.handle_add_input(KeyEvent {
+            code: KeyCode::Enter,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        });
+
+        assert!(app.modal.is_none());
+        assert!(app.last_error.is_some()); // Ureq dummy agent will fail.
     }
 }
