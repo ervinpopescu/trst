@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-// --- JSON-RPC envelope ---
-
 #[derive(Serialize)]
 pub struct RpcRequest<'a> {
     pub method: &'a str,
@@ -20,8 +18,6 @@ pub struct RpcResponse {
     #[allow(dead_code)]
     pub tag: Option<u64>,
 }
-
-// --- Torrent ---
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -238,8 +234,6 @@ pub struct Peer {
     pub is_encrypted: bool,
 }
 
-// --- Session ---
-
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionStats {
@@ -269,8 +263,6 @@ pub struct FreeSpace {
     #[allow(dead_code)]
     pub path: String,
 }
-
-// --- Field names for torrent-get ---
 
 pub const TORRENT_LIST_FIELDS: &[&str] = &[
     "id",
