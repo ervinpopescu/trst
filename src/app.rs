@@ -10,7 +10,7 @@ use crate::protocol::*;
 use crate::ui;
 use crate::util;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum View {
     TorrentList,
     Files,
@@ -1525,5 +1525,41 @@ mod tests {
             Some(Modal::ChangeLocation(loc)) => assert_eq!(loc, "/default/path"),
             _ => panic!("Expected ChangeLocation modal with prefilled path"),
         }
+    }
+
+    #[cfg(feature = "rsync")]
+    #[test]
+    fn test_r_key_opens_rsync_view() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        assert_eq!(app.view, View::TorrentList);
+        app.handle_torrent_list_key(KeyEvent {
+            code: KeyCode::Char('R'),
+            modifiers: KeyModifiers::SHIFT,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        });
+        assert_eq!(app.view, View::Rsync);
+    }
+
+    #[cfg(feature = "rsync")]
+    #[test]
+    fn test_rsync_view_back_returns_to_list() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.view = View::Rsync;
+        app.handle_rsync_key(KeyEvent {
+            code: KeyCode::Char('q'),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        });
+        assert_eq!(app.view, View::TorrentList);
     }
 }
