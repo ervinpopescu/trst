@@ -2,10 +2,10 @@ mod app;
 mod client;
 mod config;
 mod protocol;
-mod ui;
-mod util;
 #[cfg(feature = "rsync")]
 mod rsync;
+mod ui;
+mod util;
 
 struct Args {
     url: String,

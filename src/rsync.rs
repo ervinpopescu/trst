@@ -46,12 +46,11 @@ fn idle_threshold_from_config() -> u64 {
     // Simple scan — avoids pulling in the full rsync_torrents crate.
     for line in text.lines() {
         let line = line.trim();
-        if let Some(rest) = line.strip_prefix("idle_threshold") {
-            if let Some(val) = rest.trim_start_matches([' ', '=', '\t']).split('#').next() {
-                if let Ok(n) = val.trim().parse::<u64>() {
-                    return n;
-                }
-            }
+        if let Some(rest) = line.strip_prefix("idle_threshold")
+            && let Some(val) = rest.trim_start_matches([' ', '=', '\t']).split('#').next()
+            && let Ok(n) = val.trim().parse::<u64>()
+        {
+            return n;
         }
     }
     1800

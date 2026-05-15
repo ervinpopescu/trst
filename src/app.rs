@@ -495,7 +495,7 @@ impl App {
                     Err(e) => self.last_error = Some(e),
                 }
             }
-        } else if code == KeyCode::Char('R') && mods == KeyModifiers::NONE {
+        } else if code == KeyCode::Char('R') && mods == KeyModifiers::SHIFT {
             #[cfg(feature = "rsync")]
             {
                 self.refresh_rsync();
@@ -921,7 +921,7 @@ impl App {
             self.view = View::TorrentList;
         } else if b.help.matches(code, mods) {
             self.help = Some(0);
-        } else if code == KeyCode::Char('R') && mods == KeyModifiers::NONE {
+        } else if code == KeyCode::Char('R') && mods == KeyModifiers::SHIFT {
             self.refresh_rsync();
         }
     }

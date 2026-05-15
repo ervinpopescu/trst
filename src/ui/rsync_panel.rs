@@ -71,14 +71,9 @@ fn draw_log(f: &mut Frame, state: &crate::rsync::RsyncState, area: Rect) {
     let visible = area.height.saturating_sub(2); // subtract borders
     let scroll = total.saturating_sub(visible);
 
-    let block = Block::default()
-        .title(" Sync log ")
-        .borders(Borders::ALL);
+    let block = Block::default().title(" Sync log ").borders(Borders::ALL);
 
-    f.render_widget(
-        Paragraph::new(lines).block(block).scroll((scroll, 0)),
-        area,
-    );
+    f.render_widget(Paragraph::new(lines).block(block).scroll((scroll, 0)), area);
 }
 
 fn draw_idle(

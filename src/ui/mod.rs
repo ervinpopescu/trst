@@ -1,9 +1,9 @@
 mod details;
 mod files;
 mod help;
-mod torrent_list;
 #[cfg(feature = "rsync")]
 mod rsync_panel;
+mod torrent_list;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
