@@ -145,8 +145,11 @@ fn draw_input(
 ) {
     let max_input_len = area.width.saturating_sub(label.len() as u16 + 10) as usize;
 
-    let display_input = if input.len() > max_input_len && max_input_len > 3 {
-        format!("...{}", &input[input.len() - (max_input_len - 3)..])
+    let char_count = input.chars().count();
+    let display_input = if char_count > max_input_len && max_input_len > 3 {
+        let take = max_input_len - 3;
+        let suffix: String = input.chars().skip(char_count - take).collect();
+        format!("...{suffix}")
     } else {
         input.to_string()
     };
