@@ -125,18 +125,17 @@ fn main() -> std::io::Result<()> {
         (Some(u), Some(p)) => {
             let saved = save_keyring_credentials(&url, u, p);
 
-            // If it was provided on the CLI, we ALWAYS save it to config to be safe
-            if args.username.is_some() || args.password.is_some() || !saved {
-                if !saved {
-                    eprintln!(
-                        "info: keyring save failed, falling back to saving credentials in config file"
-                    );
-                }
+            if !saved {
+                eprintln!("info: keyring save failed; storing credentials in config file");
                 config.connection.url = Some(url.clone());
                 config.connection.username = Some(u.clone());
                 config.connection.password = Some(p.clone());
-                config.save();
+            } else {
+                config.connection.url = Some(url.clone());
+                config.connection.username = None;
+                config.connection.password = None;
             }
+            config.save();
             Some((u.clone(), p.clone()))
         }
         _ => {
