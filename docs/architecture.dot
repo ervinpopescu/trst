@@ -1,0 +1,96 @@
+digraph architecture {
+    rankdir=LR;
+    node [fontname="monospace", fontsize=11];
+    edge [fontsize=10];
+
+    // ── External ───────────────────────────────────────────────────────────────
+    subgraph cluster_internet {
+        label="Internet";
+        style=dashed; color=gray;
+        magnets [label="Magnet / Torrent\nlinks", shape=cylinder];
+    }
+
+    subgraph cluster_remote {
+        label="Remote server (aslan.archnet.lol)";
+        style=filled; color="#e8f4e8";
+        jellyfin  [label="Jellyfin", shape=box];
+        movies    [label="/mnt/data/media/movies", shape=folder];
+        series    [label="/mnt/data/media/series", shape=folder];
+        unsorted  [label="/mnt/data/media (default)", shape=folder];
+        jellyfin -> movies [style=dashed, label="reads"];
+        jellyfin -> series [style=dashed, label="reads"];
+    }
+
+    // ── Local machine ──────────────────────────────────────────────────────────
+    subgraph cluster_local {
+        label="Local machine";
+        style=filled; color="#eef2ff";
+
+        // Transmission
+        subgraph cluster_transmission {
+            label="transmission-daemon";
+            style=filled; color="#dde8ff";
+            td        [label="transmission-daemon\n(RPC :9091)", shape=box, style=filled, fillcolor="#b0c8ff"];
+            dl_dir    [label="~/internet/torrents", shape=folder];
+            tr_db     [label="Transmission\ntorrent DB", shape=cylinder];
+            td -> dl_dir [label="downloads to"];
+            td -> tr_db  [label="state"];
+        }
+
+        // systemd
+        subgraph cluster_systemd {
+            label="systemd (user)";
+            style=filled; color="#fff3dc";
+            timer   [label="transmission-idle-shutdown\n.timer (every 5 min)", shape=box];
+            svc     [label="transmission-idle-shutdown\n.service (oneshot)", shape=box];
+            timer -> svc [label="activates"];
+        }
+
+        // rsync-torrents package
+        subgraph cluster_pkg {
+            label="rsync-torrents (Python package)";
+            style=filled; color="#fdecea";
+            cli_sync  [label="rsync-torrents sync\n(Transmission done-hook)", shape=box, style=filled, fillcolor="#f8b4b4"];
+            cli_watch [label="rsync-torrents watch\n(systemd oneshot)", shape=box, style=filled, fillcolor="#f8b4b4"];
+            hashes    [label="~/.local/share/rsync-torrents\n/synced-hashes", shape=cylinder];
+            state_f   [label="~/.local/share/rsync-torrents\n/last-active", shape=cylinder];
+            log_f     [label="~/.local/share/rsync-torrents\n/sync.log", shape=cylinder];
+            config_t  [label="~/.config/rsync-torrents\n/config.toml", shape=note];
+        }
+
+        // trst TUI
+        subgraph cluster_trst {
+            label="trst (Rust TUI)";
+            style=filled; color="#f0fdf4";
+            trst_main [label="trst\n(ratatui)", shape=box, style=filled, fillcolor="#86efac"];
+            rsync_pnl [label="RsyncState panel\n(feature: rsync)", shape=box, style=filled, fillcolor="#bbf7d0"];
+        }
+    }
+
+    // ── Data flows ─────────────────────────────────────────────────────────────
+    magnets   -> td        [label="add torrent"];
+    td        -> cli_sync  [label="done-script\n(TR_TORRENT_* env)"];
+    cli_sync  -> dl_dir    [label="reads source"];
+    cli_sync  -> log_f     [label="appends log"];
+    cli_sync  -> hashes    [label="appends hash\n(on success)"];
+    cli_sync  -> movies    [label="rsync (label=movie)", style=bold, color="#d97706"];
+    cli_sync  -> series    [label="rsync (label=series)", style=bold, color="#d97706"];
+    cli_sync  -> unsorted  [label="rsync (default)", style=bold, color="#d97706"];
+
+    svc       -> cli_watch [label="ExecStart"];
+    cli_watch -> td        [label="JSON-RPC\nget_torrents / remove_torrent"];
+    cli_watch -> hashes    [label="read + reconcile"];
+    cli_watch -> state_f   [label="read/write\nidle clock"];
+    cli_watch -> log_f     [label="appends log"];
+    cli_watch -> dl_dir    [label="rm orphans"];
+
+    config_t  -> cli_sync  [style=dashed, label="config"];
+    config_t  -> cli_watch [style=dashed, label="config"];
+
+    trst_main -> td        [label="JSON-RPC\n(ureq)", style=bold, color="#1d4ed8"];
+    rsync_pnl -> hashes    [label="reads", style=dashed];
+    rsync_pnl -> log_f     [label="tails", style=dashed];
+    rsync_pnl -> state_f   [label="reads idle", style=dashed];
+    rsync_pnl -> config_t  [label="reads threshold", style=dashed];
+    trst_main -> rsync_pnl [label="R key\n(if --features rsync)"];
+}
