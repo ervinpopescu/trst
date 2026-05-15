@@ -45,11 +45,26 @@ impl Config {
             let _ = std::fs::create_dir_all(parent);
         }
         if let Ok(toml) = toml::to_string_pretty(self) {
-            let _ = std::fs::write(&path, toml);
             #[cfg(unix)]
             {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+                use std::io::Write;
+                use std::os::unix::fs::OpenOptionsExt;
+                let dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+                let tmp_path = dir.join(".config.toml.tmp");
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .mode(0o600)
+                    .open(&tmp_path)
+                {
+                    let _ = f.write_all(toml.as_bytes());
+                    let _ = std::fs::rename(&tmp_path, &path);
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = std::fs::write(&path, toml);
             }
         }
     }
