@@ -31,10 +31,14 @@ impl Config {
                     Self::default()
                 }
             },
-            Err(_) => {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 let cfg = Self::default();
                 cfg.save();
                 cfg
+            }
+            Err(e) => {
+                eprintln!("warning: failed to read config {}: {e}", path.display());
+                Self::default()
             }
         }
     }
