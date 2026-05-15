@@ -176,6 +176,11 @@ fn main() -> std::io::Result<()> {
     let app = app::App::new(client, config);
 
     let terminal = ratatui::init();
+    let prev_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        ratatui::restore();
+        prev_hook(info);
+    }));
     let result = app.run(terminal);
     ratatui::restore();
     result
