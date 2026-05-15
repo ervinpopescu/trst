@@ -56,19 +56,22 @@ fn parse_args() -> Args {
             }
         }
     }
+    // Only set url from positional host if --url/-u was not already provided.
     if args.url.is_empty() {
-        args.url = match host.as_deref() {
-            Some(h) if h.starts_with("http://") || h.starts_with("https://") => h.to_string(),
-            Some(h) => {
+        if let Some(h) = host.as_deref() {
+            args.url = if h.starts_with("http://") || h.starts_with("https://") {
+                h.to_string()
+            } else {
                 let h = if h.contains(':') {
                     h.to_string()
                 } else {
                     format!("{h}:9091")
                 };
                 format!("http://{h}/transmission/rpc")
-            }
-            None => "http://localhost:9091/transmission/rpc".into(),
-        };
+            };
+        }
+        // If neither --url nor a positional host was given, leave args.url empty so
+        // main() can fall back to config.connection.url before the hardcoded default.
     }
     args
 }
@@ -106,8 +109,10 @@ fn main() -> std::io::Result<()> {
 
     let url = if !args.url.is_empty() {
         args.url.clone()
+    } else if let Some(u) = config.connection.url.clone() {
+        u
     } else {
-        config.connection.url.clone().unwrap_or(args.url.clone())
+        "http://localhost:9091/transmission/rpc".to_string()
     };
 
     let cli_username = args
