@@ -15,6 +15,8 @@ pub enum View {
     TorrentList,
     Files,
     Details,
+    #[cfg(feature = "rsync")]
+    Rsync,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -122,6 +124,10 @@ pub struct App {
     pub file_cursor: usize,
     pub file_selected: BTreeSet<usize>,
 
+    // rsync-torrents panel
+    #[cfg(feature = "rsync")]
+    pub rsync_state: crate::rsync::RsyncState,
+
     // status bar
     pub stats: Option<SessionStats>,
     pub free: Option<FreeSpace>,
@@ -158,6 +164,8 @@ impl App {
             last_error: None,
             default_download_dir: None,
             free_space_tick: 0,
+            #[cfg(feature = "rsync")]
+            rsync_state: crate::rsync::RsyncState::default(),
         }
     }
 
@@ -303,6 +311,11 @@ impl App {
         {
             self.free = Some(f);
         }
+    }
+
+    #[cfg(feature = "rsync")]
+    fn refresh_rsync(&mut self) {
+        self.rsync_state = crate::rsync::RsyncState::load();
     }
 
     fn sort_torrents(&self, list: &mut [Torrent]) {
@@ -481,6 +494,12 @@ impl App {
                     Ok(None) => self.last_error = Some("torrent not found".into()),
                     Err(e) => self.last_error = Some(e),
                 }
+            }
+        } else if code == KeyCode::Char('R') && mods == KeyModifiers::NONE {
+            #[cfg(feature = "rsync")]
+            {
+                self.refresh_rsync();
+                self.view = View::Rsync;
             }
         } else if b.pause.matches(code, mods) {
             let ids = self.target_ids();
@@ -894,6 +913,19 @@ impl App {
         }
     }
 
+    #[cfg(feature = "rsync")]
+    fn handle_rsync_key(&mut self, key: KeyEvent) {
+        let (code, mods) = (key.code, key.modifiers);
+        let b = &self.bindings;
+        if b.back.matches(code, mods) || b.quit.matches(code, mods) {
+            self.view = View::TorrentList;
+        } else if b.help.matches(code, mods) {
+            self.help = Some(0);
+        } else if code == KeyCode::Char('R') && mods == KeyModifiers::NONE {
+            self.refresh_rsync();
+        }
+    }
+
     fn handle_help_key(&mut self, key: KeyEvent) {
         let (code, mods) = (key.code, key.modifiers);
         let b = &self.bindings;
@@ -931,6 +963,8 @@ impl App {
             View::TorrentList => self.handle_torrent_list_key(key),
             View::Files => self.handle_files_key(key),
             View::Details => self.handle_details_key(key),
+            #[cfg(feature = "rsync")]
+            View::Rsync => self.handle_rsync_key(key),
         }
     }
 
@@ -961,6 +995,8 @@ impl App {
                     match self.view {
                         View::TorrentList => self.refresh_torrents(),
                         View::Files | View::Details => self.refresh_detail(),
+                        #[cfg(feature = "rsync")]
+                        View::Rsync => self.refresh_rsync(),
                     }
                 }
                 self.refresh_stats();

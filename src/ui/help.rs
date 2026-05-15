@@ -46,6 +46,8 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
                 (format_bind(&k.sort_reverse), "Toggle sort direction"),
                 (format_bind(&k.edit_labels), "Edit labels"),
                 (format_bind(&k.sequential), "Toggle sequential download"),
+                #[cfg(feature = "rsync")]
+                ("R".to_string(), "rsync-torrents panel"),
                 (format_bind(&k.quit), "Quit"),
             ],
         ),

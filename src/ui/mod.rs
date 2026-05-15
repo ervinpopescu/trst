@@ -2,6 +2,8 @@ mod details;
 mod files;
 mod help;
 mod torrent_list;
+#[cfg(feature = "rsync")]
+mod rsync_panel;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -23,6 +25,8 @@ pub fn draw(f: &mut Frame, app: &App) {
             View::TorrentList => torrent_list::draw(f, app, chunks[0]),
             View::Files => files::draw(f, app, chunks[0]),
             View::Details => details::draw(f, app, chunks[0]),
+            #[cfg(feature = "rsync")]
+            View::Rsync => rsync_panel::draw(f, app, chunks[0]),
         }
     }
 

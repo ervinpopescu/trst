@@ -4,6 +4,8 @@ mod config;
 mod protocol;
 mod ui;
 mod util;
+#[cfg(feature = "rsync")]
+mod rsync;
 
 struct Args {
     url: String,
