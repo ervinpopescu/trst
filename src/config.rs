@@ -17,6 +17,7 @@ pub struct ConnectionConfig {
     pub url: Option<String>,
     pub username: Option<String>,
     pub password: Option<String>,
+    pub timeout: Option<u64>,
 }
 
 impl Config {

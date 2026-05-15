@@ -13,10 +13,11 @@ pub struct TransmissionClient {
 }
 
 impl TransmissionClient {
-    pub fn new(url: &str, auth: Option<(&str, &str)>) -> Self {
+    pub fn new(url: &str, auth: Option<(&str, &str)>, timeout: Option<u64>) -> Self {
+        let timeout = timeout.unwrap_or(10);
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .timeout_connect(Some(Duration::from_secs(5)))
-            .timeout_global(Some(Duration::from_secs(10)))
+            .timeout_global(Some(Duration::from_secs(timeout)))
             .http_status_as_error(false)
             .build()
             .into();

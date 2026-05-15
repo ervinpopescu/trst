@@ -1017,7 +1017,7 @@ mod tests {
     #[test]
     fn test_filtering() {
         let mut app = App::new(
-            TransmissionClient::new("http://dummy", None),
+            TransmissionClient::new("http://dummy", None, None),
             Config::default(),
         );
 
@@ -1108,7 +1108,7 @@ mod tests {
     #[test]
     fn test_sorting() {
         let mut app = App::new(
-            TransmissionClient::new("http://dummy", None),
+            TransmissionClient::new("http://dummy", None, None),
             Config::default(),
         );
 
@@ -1199,7 +1199,7 @@ mod tests {
     #[test]
     fn test_target_ids_cursor() {
         let mut app = App::new(
-            TransmissionClient::new("http://dummy", None),
+            TransmissionClient::new("http://dummy", None, None),
             Config::default(),
         );
         let t1 = Torrent {
@@ -1223,7 +1223,7 @@ mod tests {
     #[test]
     fn test_target_ids_selected() {
         let mut app = App::new(
-            TransmissionClient::new("http://dummy", None),
+            TransmissionClient::new("http://dummy", None, None),
             Config::default(),
         );
         let t1 = Torrent {
@@ -1251,7 +1251,7 @@ mod tests {
     #[test]
     fn test_clamp_cursor() {
         let mut app = App::new(
-            TransmissionClient::new("http://dummy", None),
+            TransmissionClient::new("http://dummy", None, None),
             Config::default(),
         );
         // Empty list: cursor stays 0
@@ -1282,7 +1282,7 @@ mod tests {
     #[test]
     fn test_file_target_indices_cursor() {
         let mut app = App::new(
-            TransmissionClient::new("http://dummy", None),
+            TransmissionClient::new("http://dummy", None, None),
             Config::default(),
         );
         app.file_cursor = 3;
@@ -1291,7 +1291,7 @@ mod tests {
     #[test]
     fn test_target_ids_from_labels() {
         let mut app = App::new(
-            TransmissionClient::new("http://dummy", None),
+            TransmissionClient::new("http://dummy", None, None),
             Config::default(),
         );
 
@@ -1327,7 +1327,7 @@ mod tests {
     #[test]
     fn test_file_target_indices_selected() {
         let mut app = App::new(
-            TransmissionClient::new("http://dummy", None),
+            TransmissionClient::new("http://dummy", None, None),
             Config::default(),
         );
         app.file_selected.insert(1);
@@ -1342,7 +1342,7 @@ mod tests {
         use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
         let mut app = App::new(
-            TransmissionClient::new("http://dummy", None),
+            TransmissionClient::new("http://dummy", None, None),
             Config::default(),
         );
 
@@ -1424,7 +1424,7 @@ mod tests {
         use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
         let mut app = App::new(
-            TransmissionClient::new("http://dummy", None),
+            TransmissionClient::new("http://dummy", None, None),
             Config::default(),
         );
 
@@ -1462,7 +1462,7 @@ mod tests {
     fn test_handle_torrent_list_key_change_location() {
         use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
         let mut app = App::new(
-            TransmissionClient::new("http://dummy", None),
+            TransmissionClient::new("http://dummy", None, None),
             Config::default(),
         );
 

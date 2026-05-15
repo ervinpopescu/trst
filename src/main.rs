@@ -164,8 +164,11 @@ fn main() -> std::io::Result<()> {
         eprintln!("  consider fronting Transmission with an HTTPS reverse proxy");
     }
 
-    let client =
-        client::TransmissionClient::new(&url, auth.as_ref().map(|(u, p)| (u.as_str(), p.as_str())));
+    let client = client::TransmissionClient::new(
+        &url,
+        auth.as_ref().map(|(u, p)| (u.as_str(), p.as_str())),
+        config.connection.timeout,
+    );
     let app = app::App::new(client, config);
 
     let terminal = ratatui::init();
