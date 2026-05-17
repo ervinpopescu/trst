@@ -553,8 +553,10 @@ impl App {
             self.rebuild_filter();
         } else if b.sort.matches(code, mods) {
             self.sort_column = self.sort_column.next();
+            self.selected.clear();
         } else if b.sort_reverse.matches(code, mods) {
             self.sort_ascending = !self.sort_ascending;
+            self.selected.clear();
         } else if b.edit_labels.matches(code, mods) {
             let visible = self.filtered_torrents();
             if let Some(t) = visible.get(self.cursor) {
