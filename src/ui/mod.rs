@@ -137,6 +137,17 @@ fn draw_confirm(f: &mut Frame, confirm: Confirm, area: Rect) {
     draw_centered_popup(f, msg, area);
 }
 
+fn truncate_input(input: &str, max_len: usize) -> String {
+    let char_count = input.chars().count();
+    if char_count > max_len && max_len > 3 {
+        let take = max_len - 3;
+        let tail: String = input.chars().skip(char_count - take).collect();
+        format!("...{tail}")
+    } else {
+        input.to_string()
+    }
+}
+
 fn draw_input(
     f: &mut Frame,
     label: &str,
@@ -146,14 +157,7 @@ fn draw_input(
 ) {
     let max_input_len = area.width.saturating_sub(label.width() as u16 + 10) as usize;
 
-    let char_count = input.chars().count();
-    let display_input = if char_count > max_input_len && max_input_len > 3 {
-        let take = max_input_len - 3;
-        let suffix: String = input.chars().skip(char_count - take).collect();
-        format!("...{suffix}")
-    } else {
-        input.to_string()
-    };
+    let display_input = truncate_input(input, max_input_len);
 
     let text = format!("{label} {display_input}█");
 
@@ -201,6 +205,71 @@ fn draw_input(
                 .alignment(ratatui::layout::Alignment::Left),
             comp_popup,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_input;
+
+    #[test]
+    fn ascii_shorter_than_max_returned_as_is() {
+        assert_eq!(truncate_input("hello", 10), "hello");
+    }
+
+    #[test]
+    fn ascii_exactly_at_max_returned_as_is() {
+        assert_eq!(truncate_input("hello", 5), "hello");
+    }
+
+    #[test]
+    fn ascii_longer_than_max_truncated_with_prefix() {
+        let result = truncate_input("abcdefghij", 7);
+        assert!(
+            result.starts_with("..."),
+            "expected '...' prefix, got: {result}"
+        );
+        assert_eq!(result.chars().count(), 7);
+    }
+
+    #[test]
+    fn multibyte_utf8_longer_than_max_no_panic() {
+        // "héllo" is 5 chars but 6 bytes; truncating by char index must not panic
+        let result = truncate_input("héllo world", 7);
+        assert!(
+            result.starts_with("..."),
+            "expected '...' prefix, got: {result}"
+        );
+        assert_eq!(result.chars().count(), 7);
+    }
+
+    #[test]
+    fn cjk_longer_than_max_no_panic() {
+        // Each hiragana char is 3 bytes
+        let result = truncate_input("こんにちは世界", 5);
+        assert!(
+            result.starts_with("..."),
+            "expected '...' prefix, got: {result}"
+        );
+        assert_eq!(result.chars().count(), 5);
+    }
+
+    #[test]
+    fn emoji_longer_than_max_no_panic() {
+        // Each crab emoji is 4 bytes
+        let result = truncate_input("🦀🦀🦀🦀🦀", 4);
+        assert!(
+            result.starts_with("..."),
+            "expected '...' prefix, got: {result}"
+        );
+        assert_eq!(result.chars().count(), 4);
+    }
+
+    #[test]
+    fn max_len_three_or_fewer_returns_input_as_is() {
+        // max_len <= 3 should never truncate (guard condition)
+        assert_eq!(truncate_input("abcdef", 3), "abcdef");
+        assert_eq!(truncate_input("abcdef", 1), "abcdef");
     }
 }
 
