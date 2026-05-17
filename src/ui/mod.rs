@@ -110,13 +110,10 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
         app.sort_column.label(),
         if app.sort_ascending { "↑" } else { "↓" }
     );
-    left_parts.push(Span::styled(
-        sort_info,
-        Style::default().fg(Color::DarkGray),
-    ));
+    left_parts.push(Span::styled(sort_info, Style::default().fg(bar_fg)));
 
     let left = Line::from(left_parts);
-    let right = Line::from(Span::styled(right, Style::default().fg(Color::DarkGray)));
+    let right = Line::from(Span::styled(right, Style::default().fg(bar_fg)));
 
     let halves =
         Layout::horizontal([Constraint::Percentage(70), Constraint::Percentage(30)]).split(area);
