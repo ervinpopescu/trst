@@ -536,4 +536,45 @@ mod tests {
         let t_false: Torrent = serde_json::from_str(json_false).unwrap();
         assert!(!t_false.sequential_download);
     }
+
+    #[test]
+    fn test_sequential_download_camelcase_not_recognized() {
+        // Transmission daemon sends snake_case; camelCase must not accidentally set the field.
+        let json = r#"{"id": 1, "sequentialDownload": true}"#;
+        let t: Torrent = serde_json::from_str(json).unwrap();
+        assert!(
+            !t.sequential_download,
+            "camelCase key must not populate sequential_download"
+        );
+    }
+
+    #[test]
+    fn test_field_arrays_contain_sequential_download() {
+        assert!(
+            TORRENT_LIST_FIELDS.contains(&"sequential_download"),
+            "TORRENT_LIST_FIELDS must request sequential_download from the daemon"
+        );
+        assert!(
+            TORRENT_DETAIL_FIELDS.contains(&"sequential_download"),
+            "TORRENT_DETAIL_FIELDS must request sequential_download from the daemon"
+        );
+    }
+
+    #[test]
+    fn test_set_sequential_rpc_key() {
+        // Verify the key sent to torrent-set is the snake_case form the daemon expects.
+        let args = serde_json::json!({
+            "ids": [1i64],
+            "sequential_download": true,
+        });
+        assert_eq!(
+            args["sequential_download"],
+            serde_json::Value::Bool(true),
+            "set_sequential must use snake_case key"
+        );
+        assert!(
+            args.get("sequentialDownload").is_none(),
+            "camelCase key must not appear in torrent-set args"
+        );
+    }
 }
