@@ -22,8 +22,11 @@ pub struct ConnectionConfig {
 
 impl Config {
     pub fn load() -> Self {
-        let path = config_path();
-        match std::fs::read_to_string(&path) {
+        Self::load_from(&config_path())
+    }
+
+    pub fn load_from(path: &PathBuf) -> Self {
+        match std::fs::read_to_string(path) {
             Ok(contents) => match toml::from_str(&contents) {
                 Ok(cfg) => cfg,
                 Err(e) => {
@@ -33,7 +36,7 @@ impl Config {
             },
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 let cfg = Self::default();
-                cfg.save();
+                cfg.save_to(path);
                 cfg
             }
             Err(e) => {
@@ -44,7 +47,10 @@ impl Config {
     }
 
     pub fn save(&self) {
-        let path = config_path();
+        self.save_to(&config_path());
+    }
+
+    pub fn save_to(&self, path: &PathBuf) {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -63,7 +69,7 @@ impl Config {
                     .open(&tmp_path)
                 {
                     let _ = f.write_all(toml.as_bytes());
-                    let _ = std::fs::rename(&tmp_path, &path);
+                    let _ = std::fs::rename(&tmp_path, path);
                 }
             }
             #[cfg(not(unix))]
@@ -453,6 +459,57 @@ impl Bindings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    // ── Config::load_from tests ───────────────────────────────────────────────
+
+    /// A path that is a directory (not a regular file) causes a read error that
+    /// is NOT ErrorKind::NotFound.  load_from must return defaults WITHOUT trying
+    /// to write a new file at that path.
+    #[test]
+    fn test_load_from_non_notfound_error_returns_defaults_without_writing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        // The path IS the directory itself — reading it as a file is an error
+        // other than NotFound.
+        let path: PathBuf = dir.path().to_path_buf();
+
+        let cfg = Config::load_from(&path);
+
+        // Should silently return defaults.
+        assert!(cfg.connection.url.is_none());
+        assert!(cfg.connection.username.is_none());
+
+        // The directory should still be a directory (no file was written there).
+        assert!(
+            path.is_dir(),
+            "load_from must not overwrite the directory path"
+        );
+    }
+
+    /// When the config file does not exist load_from must create it and return
+    /// defaults.
+    #[test]
+    fn test_load_from_missing_file_creates_file_with_defaults() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+
+        assert!(!path.exists(), "precondition: file must not exist yet");
+
+        let cfg = Config::load_from(&path);
+
+        // Returns defaults.
+        assert!(cfg.connection.url.is_none());
+
+        // The file was created.
+        assert!(
+            path.exists(),
+            "load_from must create the config file when missing"
+        );
+
+        // The file is valid TOML that round-trips back to Config.
+        let contents = std::fs::read_to_string(&path).expect("read config file");
+        let _: Config = toml::from_str(&contents).expect("config file must be valid TOML");
+    }
 
     #[test]
     fn test_parse_color() {

@@ -12,13 +12,20 @@ struct Args {
 }
 
 fn parse_args() -> Args {
+    parse_args_from(std::env::args().skip(1))
+}
+
+fn parse_args_from<I>(iter: I) -> Args
+where
+    I: Iterator<Item = String>,
+{
     let mut args = Args {
         url: String::new(),
         username: None,
         password: None,
     };
     let mut host = None;
-    let mut iter = std::env::args().skip(1);
+    let mut iter = iter.peekable();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "-u" | "--url" => {
@@ -57,19 +64,19 @@ fn parse_args() -> Args {
         }
     }
     // Only set url from positional host if --url/-u was not already provided.
-    if args.url.is_empty() {
-        if let Some(h) = host.as_deref() {
-            args.url = if h.starts_with("http://") || h.starts_with("https://") {
+    if args.url.is_empty()
+        && let Some(h) = host.as_deref()
+    {
+        args.url = if h.starts_with("http://") || h.starts_with("https://") {
+            h.to_string()
+        } else {
+            let h = if h.contains(':') {
                 h.to_string()
             } else {
-                let h = if h.contains(':') {
-                    h.to_string()
-                } else {
-                    format!("{h}:9091")
-                };
-                format!("http://{h}/transmission/rpc")
+                format!("{h}:9091")
             };
-        }
+            format!("http://{h}/transmission/rpc")
+        };
         // If neither --url nor a positional host was given, leave args.url empty so
         // main() can fall back to config.connection.url before the hardcoded default.
     }
@@ -184,4 +191,72 @@ fn main() -> std::io::Result<()> {
     let result = app.run(terminal);
     ratatui::restore();
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(slice: &[&str]) -> impl Iterator<Item = String> {
+        slice
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+            .into_iter()
+    }
+
+    /// No arguments → url is empty (main() will fall back to config / hardcoded default).
+    #[test]
+    fn test_parse_args_no_args_url_is_empty() {
+        let a = parse_args_from(args(&[]));
+        assert!(a.url.is_empty(), "url must be empty when no args are given");
+        assert!(a.username.is_none());
+        assert!(a.password.is_none());
+    }
+
+    /// Positional host argument → url is derived from the host.
+    #[test]
+    fn test_parse_args_positional_host_sets_url() {
+        let a = parse_args_from(args(&["myserver"]));
+        assert_eq!(a.url, "http://myserver:9091/transmission/rpc");
+    }
+
+    /// Positional host with explicit port.
+    #[test]
+    fn test_parse_args_positional_host_with_port_sets_url() {
+        let a = parse_args_from(args(&["myserver:8080"]));
+        assert_eq!(a.url, "http://myserver:8080/transmission/rpc");
+    }
+
+    /// Positional full HTTP URL is passed through unchanged.
+    #[test]
+    fn test_parse_args_positional_full_url_passthrough() {
+        let a = parse_args_from(args(&["http://myserver/transmission/rpc"]));
+        assert_eq!(a.url, "http://myserver/transmission/rpc");
+    }
+
+    /// --url flag sets the url.
+    #[test]
+    fn test_parse_args_url_flag_sets_url() {
+        let a = parse_args_from(args(&["--url", "http://remotehost:9091/transmission/rpc"]));
+        assert_eq!(a.url, "http://remotehost:9091/transmission/rpc");
+    }
+
+    /// -u short flag also sets the url.
+    #[test]
+    fn test_parse_args_url_short_flag_sets_url() {
+        let a = parse_args_from(args(&["-u", "http://remotehost/transmission/rpc"]));
+        assert_eq!(a.url, "http://remotehost/transmission/rpc");
+    }
+
+    /// --url flag takes precedence over a positional host.
+    #[test]
+    fn test_parse_args_url_flag_overrides_positional() {
+        let a = parse_args_from(args(&[
+            "somehost",
+            "--url",
+            "http://explicit/transmission/rpc",
+        ]));
+        assert_eq!(a.url, "http://explicit/transmission/rpc");
+    }
 }
