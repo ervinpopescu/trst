@@ -344,6 +344,9 @@ impl App {
         limit: usize,
         selecting: bool,
     ) {
+        if limit == 0 {
+            return;
+        }
         if selecting {
             selected.insert(*cursor);
             if *cursor + 1 < limit {
@@ -355,7 +358,10 @@ impl App {
         }
     }
 
-    fn move_up(cursor: &mut usize, selected: &mut BTreeSet<usize>, selecting: bool) {
+    fn move_up(cursor: &mut usize, selected: &mut BTreeSet<usize>, limit: usize, selecting: bool) {
+        if limit == 0 {
+            return;
+        }
         if selecting {
             selected.insert(*cursor);
             if *cursor > 0 {
@@ -443,7 +449,12 @@ impl App {
                 is_select_down,
             );
         } else if is_up || is_select_up {
-            Self::move_up(&mut self.cursor, &mut self.selected, is_select_up);
+            Self::move_up(
+                &mut self.cursor,
+                &mut self.selected,
+                visible_len,
+                is_select_up,
+            );
         } else if b.top.matches(code, mods) || code == KeyCode::Home {
             self.cursor = 0;
         } else if b.bottom.matches(code, mods) || code == KeyCode::End {
@@ -751,7 +762,12 @@ impl App {
                 is_select_down,
             );
         } else if is_up || is_select_up {
-            Self::move_up(&mut self.file_cursor, &mut self.file_selected, is_select_up);
+            Self::move_up(
+                &mut self.file_cursor,
+                &mut self.file_selected,
+                file_count,
+                is_select_up,
+            );
         } else if b.top.matches(code, mods) || code == KeyCode::Home {
             self.file_cursor = 0;
         } else if b.bottom.matches(code, mods) || code == KeyCode::End {
@@ -1096,11 +1112,11 @@ mod tests {
         assert!(selected.contains(&1));
         assert!(selected.contains(&2));
 
-        App::move_up(&mut cursor, &mut selected, false);
+        App::move_up(&mut cursor, &mut selected, 5, false);
         assert_eq!(cursor, 1);
         assert_eq!(selected.len(), 2);
 
-        App::move_up(&mut cursor, &mut selected, true);
+        App::move_up(&mut cursor, &mut selected, 5, true);
         assert_eq!(cursor, 0);
         assert!(selected.contains(&0));
         assert!(selected.contains(&1));
