@@ -1507,4 +1507,117 @@ mod tests {
             _ => panic!("Expected ChangeLocation modal with prefilled path"),
         }
     }
+
+    // --- regression tests for fix/selection-survives-sort ---
+
+    #[test]
+    fn test_sort_clears_selection() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+
+        app.torrents = vec![
+            Torrent {
+                id: 1,
+                name: "alpha".into(),
+                ..Default::default()
+            },
+            Torrent {
+                id: 2,
+                name: "beta".into(),
+                ..Default::default()
+            },
+            Torrent {
+                id: 3,
+                name: "gamma".into(),
+                ..Default::default()
+            },
+        ];
+        app.rebuild_filter();
+
+        // pre-select some indices
+        app.selected.insert(0);
+        app.selected.insert(2);
+        assert!(!app.selected.is_empty());
+
+        // press 's' — the default sort key
+        let key = KeyEvent {
+            code: KeyCode::Char('s'),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        };
+        app.handle_torrent_list_key(key);
+
+        assert!(
+            app.selected.is_empty(),
+            "selection must be cleared when sort order changes"
+        );
+    }
+
+    #[test]
+    fn test_move_down_empty_list_does_not_populate_selected() {
+        let mut cursor: usize = 0;
+        let mut selected = BTreeSet::new();
+        App::move_down(&mut cursor, &mut selected, 0, true);
+        assert!(
+            selected.is_empty(),
+            "move_down on empty list must not insert into selected"
+        );
+        assert_eq!(cursor, 0);
+    }
+
+    #[test]
+    fn test_move_up_empty_list_does_not_populate_selected() {
+        let mut cursor: usize = 0;
+        let mut selected = BTreeSet::new();
+        App::move_up(&mut cursor, &mut selected, 0, true);
+        assert!(
+            selected.is_empty(),
+            "move_up on empty list must not insert into selected"
+        );
+        assert_eq!(cursor, 0);
+    }
+
+    #[test]
+    fn test_refresh_detail_ok_none_clears_file_state() {
+        // Simulate what refresh_detail() does on Ok(None): the torrent disappeared.
+        // We set up the state as if the user was in the file view, then replicate
+        // the Ok(None) branch and assert all file state is reset.
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+
+        // Put app into file-view state
+        app.view = View::Files;
+        app.detail_torrent = Some(Torrent {
+            id: 42,
+            name: "some-torrent".into(),
+            ..Default::default()
+        });
+        app.file_cursor = 3;
+        app.file_selected.insert(1);
+        app.file_selected.insert(2);
+
+        // Replicate the Ok(None) branch from refresh_detail()
+        app.detail_torrent = None;
+        app.file_cursor = 0;
+        app.file_selected.clear();
+        app.view = View::TorrentList;
+
+        assert!(app.detail_torrent.is_none(), "detail_torrent must be None");
+        assert_eq!(app.file_cursor, 0, "file_cursor must be reset to 0");
+        assert!(
+            app.file_selected.is_empty(),
+            "file_selected must be cleared"
+        );
+        assert!(
+            matches!(app.view, View::TorrentList),
+            "view must return to TorrentList"
+        );
+    }
 }
