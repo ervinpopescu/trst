@@ -888,7 +888,33 @@ impl App {
         self.refresh_detail();
     }
 
+    fn is_local_daemon(&self) -> bool {
+        let url = &self.client.url;
+        // Parse the host from the URL (e.g. "http://127.0.0.1:9091/transmission/rpc")
+        let host = if let Some(after_scheme) = url.find("://").map(|i| &url[i + 3..]) {
+            let host_and_rest = after_scheme.split('/').next().unwrap_or("");
+            // Strip port if present
+            if host_and_rest.starts_with('[') {
+                // IPv6 literal: [::1]:port
+                host_and_rest
+                    .trim_start_matches('[')
+                    .split(']')
+                    .next()
+                    .unwrap_or("")
+            } else {
+                host_and_rest.split(':').next().unwrap_or("")
+            }
+        } else {
+            ""
+        };
+        matches!(host, "localhost" | "127.0.0.1" | "::1")
+    }
+
     fn delete_files_from_disk(&mut self) {
+        if !self.is_local_daemon() {
+            self.last_error = Some("delete from disk is only supported for local daemons".into());
+            return;
+        }
         let Some(torrent) = &self.detail_torrent else {
             return;
         };

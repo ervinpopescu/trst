@@ -7,7 +7,7 @@ use crate::protocol::*;
 
 pub struct TransmissionClient {
     agent: ureq::Agent,
-    url: String,
+    pub url: String,
     auth_header: Option<String>,
     session_id: RefCell<Option<String>>,
 }
