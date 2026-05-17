@@ -1,6 +1,6 @@
 use base64::Engine as _;
 use serde_json::{Value, json};
-use std::cell::RefCell;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use crate::protocol::*;
@@ -9,7 +9,7 @@ pub struct TransmissionClient {
     agent: ureq::Agent,
     url: String,
     auth_header: Option<String>,
-    session_id: RefCell<Option<String>>,
+    session_id: Mutex<Option<String>>,
 }
 
 impl TransmissionClient {
@@ -32,7 +32,7 @@ impl TransmissionClient {
             agent,
             url: url.to_string(),
             auth_header,
-            session_id: RefCell::new(None),
+            session_id: Mutex::new(None),
         }
     }
 
@@ -54,7 +54,7 @@ impl TransmissionClient {
             if let Some(auth) = &self.auth_header {
                 req = req.header("Authorization", auth);
             }
-            if let Some(sid) = self.session_id.borrow().as_deref() {
+            if let Some(sid) = self.session_id.lock().unwrap().as_deref() {
                 req = req.header("X-Transmission-Session-Id", sid);
             }
 
@@ -68,7 +68,7 @@ impl TransmissionClient {
                             {
                                 return Err("malformed session ID in response header".into());
                             }
-                            *self.session_id.borrow_mut() = Some(sid_str.to_string());
+                            *self.session_id.lock().unwrap() = Some(sid_str.to_string());
                             continue;
                         }
                         return Err("409 without session ID header".into());
