@@ -485,14 +485,11 @@ impl App {
         } else if b.pause.matches(code, mods) {
             let ids = self.target_ids();
             if !ids.is_empty() {
-                let visible = self.filtered_torrents();
                 let any_stopped = self
-                    .selected
+                    .torrents
                     .iter()
-                    .filter_map(|&i| visible.get(i))
-                    .any(|t| t.is_stopped())
-                    || (self.selected.is_empty()
-                        && visible.get(self.cursor).is_some_and(|t| t.is_stopped()));
+                    .filter(|t| ids.contains(&t.id))
+                    .any(|t| t.is_stopped());
                 let result = if any_stopped {
                     self.client.start(&ids)
                 } else {
