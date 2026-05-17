@@ -527,23 +527,35 @@ impl App {
             }
         } else if b.reannounce.matches(code, mods) {
             let ids = self.target_ids();
+            if ids.is_empty() {
+                return;
+            }
             if let Err(e) = self.client.reannounce(&ids) {
                 self.last_error = Some(e);
             }
             self.selected.clear();
         } else if b.verify.matches(code, mods) {
             let ids = self.target_ids();
+            if ids.is_empty() {
+                return;
+            }
             if let Err(e) = self.client.verify(&ids) {
                 self.last_error = Some(e);
             }
             self.selected.clear();
         } else if b.queue_up.matches(code, mods) {
             let ids = self.target_ids();
+            if ids.is_empty() {
+                return;
+            }
             if let Err(e) = self.client.queue_move("queue-move-up", &ids) {
                 self.last_error = Some(e);
             }
         } else if b.queue_down.matches(code, mods) {
             let ids = self.target_ids();
+            if ids.is_empty() {
+                return;
+            }
             if let Err(e) = self.client.queue_move("queue-move-down", &ids) {
                 self.last_error = Some(e);
             }
