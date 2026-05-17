@@ -280,6 +280,8 @@ impl App {
             }
             Ok(None) => {
                 self.detail_torrent = None;
+                self.file_cursor = 0;
+                self.file_selected.clear();
                 self.view = View::TorrentList;
             }
             Err(e) => self.last_error = Some(e),
