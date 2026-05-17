@@ -8,6 +8,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use unicode_width::UnicodeWidthStr;
 
 use crate::app::{App, Confirm, Modal, View};
 use crate::config::parse_color;
@@ -146,7 +147,7 @@ fn draw_input(
     area: Rect,
     completions: Option<Vec<String>>,
 ) {
-    let max_input_len = area.width.saturating_sub(label.len() as u16 + 10) as usize;
+    let max_input_len = area.width.saturating_sub(label.width() as u16 + 10) as usize;
 
     let char_count = input.chars().count();
     let display_input = if char_count > max_input_len && max_input_len > 3 {
@@ -159,7 +160,7 @@ fn draw_input(
 
     let text = format!("{label} {display_input}█");
 
-    let width = (text.len() as u16 + 4).min(area.width);
+    let width = (text.width() as u16 + 4).min(area.width);
     let x = area.x + (area.width.saturating_sub(width)) / 2;
     let y = area.y + area.height / 2;
     let popup = Rect::new(x, y, width, 3);
@@ -207,7 +208,7 @@ fn draw_input(
 }
 
 fn draw_centered_popup(f: &mut Frame, text: &str, area: Rect) {
-    let width = (text.len() as u16 + 4).min(area.width);
+    let width = (text.width() as u16 + 4).min(area.width);
     let x = area.x + (area.width.saturating_sub(width)) / 2;
     let y = area.y + area.height / 2;
     let popup = Rect::new(x, y, width, 3);
