@@ -1528,4 +1528,178 @@ mod tests {
             _ => panic!("Expected ChangeLocation modal with prefilled path"),
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Tests for the empty-id guard: reannounce, verify, queue_up, queue_down
+    // -------------------------------------------------------------------------
+
+    fn make_key(
+        code: crossterm::event::KeyCode,
+        modifiers: crossterm::event::KeyModifiers,
+    ) -> crossterm::event::KeyEvent {
+        use crossterm::event::{KeyEventKind, KeyEventState};
+        crossterm::event::KeyEvent {
+            code,
+            modifiers,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        }
+    }
+
+    /// Build an App with an empty torrent list connected to a dummy (unreachable) URL.
+    /// Any actual RPC call would fail and set `last_error`.
+    fn empty_app() -> App {
+        App::new(
+            TransmissionClient::new("http://dummy.invalid:9091/transmission/rpc", None, None),
+            Config::default(),
+        )
+    }
+
+    #[test]
+    fn test_reannounce_empty_ids_no_error() {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        let mut app = empty_app();
+        // torrents is empty, so target_ids() returns []
+        assert!(app.target_ids().is_empty());
+
+        app.handle_torrent_list_key(make_key(KeyCode::Char('t'), KeyModifiers::NONE));
+        assert!(
+            app.last_error.is_none(),
+            "reannounce with no torrents should not set last_error, got: {:?}",
+            app.last_error
+        );
+    }
+
+    #[test]
+    fn test_verify_empty_ids_no_error() {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        let mut app = empty_app();
+        assert!(app.target_ids().is_empty());
+
+        app.handle_torrent_list_key(make_key(KeyCode::Char('v'), KeyModifiers::NONE));
+        assert!(
+            app.last_error.is_none(),
+            "verify with no torrents should not set last_error, got: {:?}",
+            app.last_error
+        );
+    }
+
+    #[test]
+    fn test_queue_up_empty_ids_no_error() {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        let mut app = empty_app();
+        assert!(app.target_ids().is_empty());
+
+        // queue_up is bound to 'K' (uppercase, so SHIFT modifier)
+        app.handle_torrent_list_key(make_key(KeyCode::Char('K'), KeyModifiers::SHIFT));
+        assert!(
+            app.last_error.is_none(),
+            "queue_up with no torrents should not set last_error, got: {:?}",
+            app.last_error
+        );
+    }
+
+    #[test]
+    fn test_queue_down_empty_ids_no_error() {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        let mut app = empty_app();
+        assert!(app.target_ids().is_empty());
+
+        // queue_down is bound to 'J' (uppercase, so SHIFT modifier)
+        app.handle_torrent_list_key(make_key(KeyCode::Char('J'), KeyModifiers::SHIFT));
+        assert!(
+            app.last_error.is_none(),
+            "queue_down with no torrents should not set last_error, got: {:?}",
+            app.last_error
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Tests for is_local_daemon
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_is_local_daemon_localhost() {
+        let app = App::new(
+            TransmissionClient::new("http://localhost:9091/transmission/rpc", None, None),
+            Config::default(),
+        );
+        assert!(app.is_local_daemon());
+    }
+
+    #[test]
+    fn test_is_local_daemon_ipv4_loopback() {
+        let app = App::new(
+            TransmissionClient::new("http://127.0.0.1:9091/transmission/rpc", None, None),
+            Config::default(),
+        );
+        assert!(app.is_local_daemon());
+    }
+
+    #[test]
+    fn test_is_local_daemon_ipv6_loopback() {
+        let app = App::new(
+            TransmissionClient::new("http://[::1]:9091/transmission/rpc", None, None),
+            Config::default(),
+        );
+        assert!(app.is_local_daemon());
+    }
+
+    #[test]
+    fn test_is_local_daemon_remote_ip() {
+        let app = App::new(
+            TransmissionClient::new("http://192.168.1.1:9091/transmission/rpc", None, None),
+            Config::default(),
+        );
+        assert!(!app.is_local_daemon());
+    }
+
+    #[test]
+    fn test_is_local_daemon_remote_hostname() {
+        let app = App::new(
+            TransmissionClient::new("http://remote.example.com/transmission/rpc", None, None),
+            Config::default(),
+        );
+        assert!(!app.is_local_daemon());
+    }
+
+    // -------------------------------------------------------------------------
+    // Test for delete_files_from_disk blocked on remote daemon
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_delete_files_from_disk_blocked_on_remote() {
+        use crate::protocol::TorrentFile;
+
+        let mut app = App::new(
+            TransmissionClient::new("http://192.168.1.1:9091/transmission/rpc", None, None),
+            Config::default(),
+        );
+
+        // Set up a detail torrent with a file so the function would normally proceed
+        app.detail_torrent = Some(Torrent {
+            id: 1,
+            download_dir: "/downloads".into(),
+            files: vec![TorrentFile {
+                name: "test_file.txt".into(),
+                length: 100,
+                bytes_completed: 100,
+            }],
+            ..Default::default()
+        });
+        app.file_cursor = 0;
+
+        // Call delete_files_from_disk directly
+        app.delete_files_from_disk();
+
+        assert!(
+            app.last_error.is_some(),
+            "delete_files_from_disk on remote should set last_error"
+        );
+        let err = app.last_error.as_ref().unwrap();
+        assert!(
+            err.contains("local"),
+            "error message should mention 'local', got: {err}"
+        );
+    }
 }
