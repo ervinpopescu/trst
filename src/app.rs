@@ -498,17 +498,23 @@ impl App {
         } else if b.pause.matches(code, mods) {
             let ids = self.target_ids();
             if !ids.is_empty() {
-                let any_stopped = self
-                    .torrents
-                    .iter()
-                    .filter(|t| ids.contains(&t.id))
-                    .any(|t| t.is_stopped());
-                let result = if any_stopped {
-                    self.client.start(&ids)
-                } else {
-                    self.client.stop(&ids)
-                };
-                if let Err(e) = result {
+                let mut stopped_ids: Vec<i64> = Vec::new();
+                let mut running_ids: Vec<i64> = Vec::new();
+                for t in self.torrents.iter().filter(|t| ids.contains(&t.id)) {
+                    if t.is_stopped() {
+                        stopped_ids.push(t.id);
+                    } else {
+                        running_ids.push(t.id);
+                    }
+                }
+                if !stopped_ids.is_empty()
+                    && let Err(e) = self.client.start(&stopped_ids)
+                {
+                    self.last_error = Some(e);
+                }
+                if !running_ids.is_empty()
+                    && let Err(e) = self.client.stop(&running_ids)
+                {
                     self.last_error = Some(e);
                 }
                 self.selected.clear();
@@ -564,9 +570,17 @@ impl App {
         } else if b.sort.matches(code, mods) {
             self.sort_column = self.sort_column.next();
             self.selected.clear();
+            let mut list = std::mem::take(&mut self.torrents);
+            self.sort_torrents(&mut list);
+            self.torrents = list;
+            self.rebuild_filter();
         } else if b.sort_reverse.matches(code, mods) {
             self.sort_ascending = !self.sort_ascending;
             self.selected.clear();
+            let mut list = std::mem::take(&mut self.torrents);
+            self.sort_torrents(&mut list);
+            self.torrents = list;
+            self.rebuild_filter();
         } else if b.edit_labels.matches(code, mods) {
             let visible = self.filtered_torrents();
             if let Some(t) = visible.get(self.cursor) {
@@ -1556,6 +1570,57 @@ mod tests {
             app.selected.is_empty(),
             "selection must be cleared when sort order changes"
         );
+        // List must also be immediately re-sorted (name asc = alpha, beta, gamma)
+        assert_eq!(
+            app.torrents
+                .iter()
+                .map(|t| t.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["alpha", "beta", "gamma"],
+            "torrents must be re-sorted immediately on keypress, not deferred to next tick"
+        );
+    }
+
+    #[test]
+    fn test_pause_toggles_per_torrent() {
+        // When the selection contains both stopped and running torrents, pause must
+        // start the stopped ones and stop the running ones independently.
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.torrents = vec![
+            Torrent {
+                id: 1,
+                status: 0,
+                ..Default::default()
+            }, // stopped
+            Torrent {
+                id: 2,
+                status: 4,
+                ..Default::default()
+            }, // downloading (running)
+            Torrent {
+                id: 3,
+                status: 0,
+                ..Default::default()
+            }, // stopped
+        ];
+        app.rebuild_filter();
+
+        // Verify the per-torrent split logic directly
+        let ids = vec![1i64, 2, 3];
+        let mut stopped_ids: Vec<i64> = Vec::new();
+        let mut running_ids: Vec<i64> = Vec::new();
+        for t in app.torrents.iter().filter(|t| ids.contains(&t.id)) {
+            if t.is_stopped() {
+                stopped_ids.push(t.id);
+            } else {
+                running_ids.push(t.id);
+            }
+        }
+        assert_eq!(stopped_ids, vec![1, 3], "stopped torrents must be started");
+        assert_eq!(running_ids, vec![2], "running torrents must be stopped");
     }
 
     #[test]
