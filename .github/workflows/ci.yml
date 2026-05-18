@@ -34,15 +34,15 @@ jobs:
     - name: Format
       run: cargo fmt -- --check
     - name: Lint (Clippy)
-      run: cargo clippy -- -D warnings
+      run: cargo clippy --all-features -- -D warnings
     - name: Install cargo-llvm-cov
       uses: taiki-e/install-action@cargo-llvm-cov
     - name: Build
-      run: cargo build --verbose
+      run: cargo build --all-features --verbose
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test --all-features --verbose
     - name: Coverage
-      run: cargo llvm-cov --lcov --output-path lcov.info --ignore-filename-regex "src/main.rs|src/ui/.*"
+      run: cargo llvm-cov --all-features --lcov --output-path lcov.info --ignore-filename-regex "src/main.rs|src/ui/.*"
     - name: Upload to Codecov
       uses: codecov/codecov-action@v5
       with:

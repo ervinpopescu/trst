@@ -10,11 +10,13 @@ use crate::protocol::*;
 use crate::ui;
 use crate::util;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum View {
     TorrentList,
     Files,
     Details,
+    #[cfg(feature = "rsync")]
+    Rsync,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -122,6 +124,9 @@ pub struct App {
     pub file_cursor: usize,
     pub file_selected: BTreeSet<usize>,
 
+    #[cfg(feature = "rsync")]
+    pub rsync_state: crate::rsync::RsyncState,
+
     // status bar
     pub stats: Option<SessionStats>,
     pub free: Option<FreeSpace>,
@@ -153,6 +158,8 @@ impl App {
             detail_torrent: None,
             file_cursor: 0,
             file_selected: BTreeSet::new(),
+            #[cfg(feature = "rsync")]
+            rsync_state: crate::rsync::RsyncState::default(),
             stats: None,
             free: None,
             last_error: None,
@@ -304,6 +311,22 @@ impl App {
             && let Ok(f) = self.client.free_space(dir)
         {
             self.free = Some(f);
+        }
+    }
+
+    #[cfg(feature = "rsync")]
+    fn refresh_rsync(&mut self) {
+        self.rsync_state = crate::rsync::RsyncState::load();
+    }
+
+    #[cfg(feature = "rsync")]
+    fn handle_rsync_key(&mut self, key: KeyEvent) {
+        let (code, mods) = (key.code, key.modifiers);
+        let b = &self.bindings;
+        if b.back.matches(code, mods) || b.quit.matches(code, mods) || code == KeyCode::Esc {
+            self.view = View::TorrentList;
+        } else if code == KeyCode::Char('R') && mods == KeyModifiers::SHIFT {
+            self.refresh_rsync();
         }
     }
 
@@ -617,6 +640,11 @@ impl App {
                 }
                 self.selected.clear();
             }
+        }
+        #[cfg(feature = "rsync")]
+        if code == KeyCode::Char('R') && mods == KeyModifiers::SHIFT {
+            self.refresh_rsync();
+            self.view = View::Rsync;
         }
     }
 
@@ -1000,6 +1028,8 @@ impl App {
             View::TorrentList => self.handle_torrent_list_key(key),
             View::Files => self.handle_files_key(key),
             View::Details => self.handle_details_key(key),
+            #[cfg(feature = "rsync")]
+            View::Rsync => self.handle_rsync_key(key),
         }
     }
 
@@ -1030,6 +1060,8 @@ impl App {
                     match self.view {
                         View::TorrentList => self.refresh_torrents(),
                         View::Files | View::Details => self.refresh_detail(),
+                        #[cfg(feature = "rsync")]
+                        View::Rsync => self.refresh_rsync(),
                     }
                 }
                 self.refresh_stats();
@@ -1683,6 +1715,42 @@ mod tests {
             "move_up on empty list must not insert into selected"
         );
         assert_eq!(cursor, 0);
+    }
+
+    #[cfg(feature = "rsync")]
+    #[test]
+    fn test_r_key_opens_rsync_view() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        assert_eq!(app.view, View::TorrentList);
+        app.handle_torrent_list_key(KeyEvent {
+            code: KeyCode::Char('R'),
+            modifiers: KeyModifiers::SHIFT,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        });
+        assert_eq!(app.view, View::Rsync);
+    }
+
+    #[cfg(feature = "rsync")]
+    #[test]
+    fn test_rsync_view_back_returns_to_list() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.view = View::Rsync;
+        app.handle_rsync_key(KeyEvent {
+            code: KeyCode::Esc,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        });
+        assert_eq!(app.view, View::TorrentList);
     }
 
     #[test]

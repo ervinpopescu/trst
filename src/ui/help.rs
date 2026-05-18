@@ -16,39 +16,41 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
     let key_color = parse_color(&th.help_key);
 
     // build binding labels from actual config
-    let sections = [
+    #[allow(unused_mut)]
+    let mut torrent_list_bindings: Vec<(String, &str)> = vec![
+        (format_bind(&k.down), "Move down (also ↓)"),
+        (format_bind(&k.up), "Move up (also ↑)"),
+        (format_bind(&k.select_down), "Select down (also shift+↓)"),
+        (format_bind(&k.select_up), "Select up (also shift+↑)"),
+        (format_bind(&k.select_toggle), "Toggle select"),
+        (format_bind(&k.top), "Top (also Home)"),
+        (format_bind(&k.bottom), "Bottom (also End)"),
+        (format_bind(&k.enter), "Open files"),
+        (format_bind(&k.details), "Torrent details"),
+        (format_bind(&k.pause), "Pause / resume"),
+        (format_bind(&k.remove), "Remove torrent"),
+        (format_bind(&k.delete), "Remove + delete files"),
+        (format_bind(&k.add), "Add torrent (magnet/URL + location)"),
+        (format_bind(&k.change_location), "Change download location"),
+        (format_bind(&k.reannounce), "Reannounce"),
+        (format_bind(&k.verify), "Verify"),
+        (format_bind(&k.queue_up), "Queue up"),
+        (format_bind(&k.queue_down), "Queue down"),
         (
-            "Torrent list",
-            vec![
-                (format_bind(&k.down), "Move down (also ↓)"),
-                (format_bind(&k.up), "Move up (also ↑)"),
-                (format_bind(&k.select_down), "Select down (also shift+↓)"),
-                (format_bind(&k.select_up), "Select up (also shift+↑)"),
-                (format_bind(&k.select_toggle), "Toggle select"),
-                (format_bind(&k.top), "Top (also Home)"),
-                (format_bind(&k.bottom), "Bottom (also End)"),
-                (format_bind(&k.enter), "Open files"),
-                (format_bind(&k.details), "Torrent details"),
-                (format_bind(&k.pause), "Pause / resume"),
-                (format_bind(&k.remove), "Remove torrent"),
-                (format_bind(&k.delete), "Remove + delete files"),
-                (format_bind(&k.add), "Add torrent (magnet/URL + location)"),
-                (format_bind(&k.change_location), "Change download location"),
-                (format_bind(&k.reannounce), "Reannounce"),
-                (format_bind(&k.verify), "Verify"),
-                (format_bind(&k.queue_up), "Queue up"),
-                (format_bind(&k.queue_down), "Queue down"),
-                (
-                    format_bind(&k.filter),
-                    "Filter (name, status:, tracker:, label:)",
-                ),
-                (format_bind(&k.sort), "Cycle sort column"),
-                (format_bind(&k.sort_reverse), "Toggle sort direction"),
-                (format_bind(&k.edit_labels), "Edit labels"),
-                (format_bind(&k.sequential), "Toggle sequential download"),
-                (format_bind(&k.quit), "Quit"),
-            ],
+            format_bind(&k.filter),
+            "Filter (name, status:, tracker:, label:)",
         ),
+        (format_bind(&k.sort), "Cycle sort column"),
+        (format_bind(&k.sort_reverse), "Toggle sort direction"),
+        (format_bind(&k.edit_labels), "Edit labels"),
+        (format_bind(&k.sequential), "Toggle sequential download"),
+        (format_bind(&k.quit), "Quit"),
+    ];
+    #[cfg(feature = "rsync")]
+    torrent_list_bindings.push(("R".to_string(), "Open rsync-torrents panel"));
+
+    let sections = [
+        ("Torrent list", torrent_list_bindings),
         (
             "File list",
             vec![

@@ -2,6 +2,8 @@ mod app;
 mod client;
 mod config;
 mod protocol;
+#[cfg(feature = "rsync")]
+mod rsync;
 mod ui;
 mod util;
 
