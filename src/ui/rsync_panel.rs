@@ -50,7 +50,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
     // --- Idle countdown ---
     let idle_line = match state.idle_seconds {
         None => Line::from(Span::styled(
-            " rsync-torrents: state file missing (daemon active or never synced) ",
+            " transmission not running ",
             Style::default().fg(Color::DarkGray),
         )),
         Some(idle) => {

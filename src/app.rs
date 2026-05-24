@@ -1034,11 +1034,8 @@ impl App {
     }
 
     pub fn run(mut self, mut terminal: DefaultTerminal) -> std::io::Result<()> {
-        self.refresh_torrents();
-        self.refresh_stats();
-
         let tick_rate = Duration::from_secs(1);
-        let mut last_tick = Instant::now();
+        let mut last_tick = Instant::now() - tick_rate;
 
         loop {
             terminal.draw(|f| ui::draw(f, &self))?;
