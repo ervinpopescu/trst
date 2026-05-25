@@ -198,4 +198,97 @@ mod tests {
         assert_eq!(percent(0.55), "55.0%");
         assert_eq!(percent(1.0), "100.0%");
     }
+
+    #[test]
+    fn test_get_path_suggestions_empty_input() {
+        let result = get_path_suggestions("");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_get_path_suggestions_with_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().to_str().unwrap();
+        std::fs::create_dir(dir.path().join("alpha")).unwrap();
+        std::fs::create_dir(dir.path().join("beta")).unwrap();
+        std::fs::File::create(dir.path().join("gamma.txt")).unwrap();
+
+        // prefix ending with '/' lists all subdirs
+        let input = format!("{}/", base);
+        let results = get_path_suggestions(&input);
+        assert!(results.contains(&"alpha".to_string()));
+        assert!(results.contains(&"beta".to_string()));
+        assert!(
+            !results.contains(&"gamma.txt".to_string()),
+            "files excluded"
+        );
+
+        // prefix matching 'al' returns only 'alpha'
+        let input = format!("{}/al", base);
+        let results = get_path_suggestions(&input);
+        assert_eq!(results, vec!["alpha".to_string()]);
+
+        // prefix with no match returns empty
+        let input = format!("{}/xyz", base);
+        let results = get_path_suggestions(&input);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_autocomplete_path_empty() {
+        assert_eq!(autocomplete_path(""), None);
+    }
+
+    #[test]
+    fn test_autocomplete_path_single_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().to_str().unwrap();
+        std::fs::create_dir(dir.path().join("only_match")).unwrap();
+
+        let input = format!("{}/only", base);
+        let result = autocomplete_path(&input);
+        assert!(result.is_some());
+        let completed = result.unwrap();
+        assert!(completed.contains("only_match"));
+        assert!(completed.ends_with('/'));
+    }
+
+    #[test]
+    fn test_autocomplete_path_multiple_matches_common_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().to_str().unwrap();
+        std::fs::create_dir(dir.path().join("common_a")).unwrap();
+        std::fs::create_dir(dir.path().join("common_b")).unwrap();
+
+        let input = format!("{}/comm", base);
+        let result = autocomplete_path(&input);
+        assert!(result.is_some());
+        let completed = result.unwrap();
+        assert!(completed.contains("common"));
+
+        // Exact match at the common prefix boundary → None (no extension beyond "comm")
+        let input2 = format!("{}/common_", base);
+        // Two entries share prefix "common_" so common prefix == "common_" == input prefix → None
+        let result2 = autocomplete_path(&input2);
+        assert!(result2.is_none());
+    }
+
+    #[test]
+    fn test_autocomplete_path_no_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().to_str().unwrap();
+        let input = format!("{}/nonexistent", base);
+        assert_eq!(autocomplete_path(&input), None);
+    }
+
+    #[test]
+    fn test_get_path_suggestions_trailing_slash() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().to_str().unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+
+        let input = format!("{}/", base);
+        let results = get_path_suggestions(&input);
+        assert!(results.contains(&"sub".to_string()));
+    }
 }
