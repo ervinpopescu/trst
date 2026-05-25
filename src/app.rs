@@ -156,6 +156,7 @@ pub struct App {
     pub stats: Option<SessionStats>,
     pub free: Option<FreeSpace>,
     pub last_error: Option<String>,
+    error_since: Option<Instant>,
     pub default_download_dir: Option<String>,
     free_space_tick: u8,
 
@@ -194,6 +195,7 @@ impl App {
             stats: None,
             free: None,
             last_error: None,
+            error_since: None,
             default_download_dir: None,
             free_space_tick: 0,
             refresh_tx,
@@ -297,7 +299,19 @@ impl App {
         }
     }
 
-    fn set_error(&mut self, e: String) {
+    fn tick_autoclear(&mut self) {
+        if self
+            .error_since
+            .map(|t| t.elapsed() >= Duration::from_secs(10))
+            .unwrap_or(false)
+        {
+            self.last_error = None;
+            self.error_since = None;
+        }
+    }
+
+    fn set_error(&mut self, e: impl Into<String>) {
+        let e = e.into();
         if e == "HTTP 401 Unauthorized" && !matches!(self.modal, Some(Modal::Auth { .. })) {
             self.modal = Some(Modal::Auth {
                 username: String::new(),
@@ -306,6 +320,7 @@ impl App {
             });
         } else {
             self.last_error = Some(e);
+            self.error_since = Some(Instant::now());
         }
     }
 
@@ -317,6 +332,7 @@ impl App {
                 self.rebuild_filter();
                 self.clamp_cursor();
                 self.last_error = None;
+                self.error_since = None;
             }
             Err(e) => self.set_error(e),
         }
@@ -412,6 +428,7 @@ impl App {
                         self.rebuild_filter();
                         self.clamp_cursor();
                         self.last_error = None;
+                        self.error_since = None;
                     }
                     Err(e) => self.set_error(e),
                 },
@@ -573,7 +590,7 @@ impl App {
                         let ids = self.target_ids();
                         let delete = matches!(confirm, Confirm::DeleteFiles);
                         if let Err(e) = self.client.remove(&ids, delete) {
-                            self.last_error = Some(e);
+                            self.set_error(e);
                         }
                         self.selected.clear();
                         self.modal = None;
@@ -637,8 +654,8 @@ impl App {
                         self.file_selected.clear();
                         self.view = View::Files;
                     }
-                    Ok(None) => self.last_error = Some("torrent not found".into()),
-                    Err(e) => self.last_error = Some(e),
+                    Ok(None) => self.set_error("torrent not found"),
+                    Err(e) => self.set_error(e),
                 }
             }
         } else if b.details.matches(code, mods) {
@@ -650,8 +667,8 @@ impl App {
                         self.detail_torrent = Some(t);
                         self.view = View::Details;
                     }
-                    Ok(None) => self.last_error = Some("torrent not found".into()),
-                    Err(e) => self.last_error = Some(e),
+                    Ok(None) => self.set_error("torrent not found"),
+                    Err(e) => self.set_error(e),
                 }
             }
         } else if b.pause.matches(code, mods) {
@@ -669,12 +686,12 @@ impl App {
                 if !stopped_ids.is_empty()
                     && let Err(e) = self.client.start(&stopped_ids)
                 {
-                    self.last_error = Some(e);
+                    self.set_error(e);
                 }
                 if !running_ids.is_empty()
                     && let Err(e) = self.client.stop(&running_ids)
                 {
-                    self.last_error = Some(e);
+                    self.set_error(e);
                 }
                 self.selected.clear();
             }
@@ -706,7 +723,7 @@ impl App {
                 return;
             }
             if let Err(e) = self.client.reannounce(&ids) {
-                self.last_error = Some(e);
+                self.set_error(e);
             }
             self.selected.clear();
         } else if b.verify.matches(code, mods) {
@@ -715,7 +732,7 @@ impl App {
                 return;
             }
             if let Err(e) = self.client.verify(&ids) {
-                self.last_error = Some(e);
+                self.set_error(e);
             }
             self.selected.clear();
         } else if b.queue_up.matches(code, mods) {
@@ -724,7 +741,7 @@ impl App {
                 return;
             }
             if let Err(e) = self.client.queue_move("queue-move-up", &ids) {
-                self.last_error = Some(e);
+                self.set_error(e);
             }
         } else if b.queue_down.matches(code, mods) {
             let ids = self.target_ids();
@@ -732,7 +749,7 @@ impl App {
                 return;
             }
             if let Err(e) = self.client.queue_move("queue-move-down", &ids) {
-                self.last_error = Some(e);
+                self.set_error(e);
             }
         } else if b.filter.matches(code, mods) {
             self.modal = Some(Modal::Filter);
@@ -767,7 +784,7 @@ impl App {
                     .filter(|t| ids.contains(&t.id))
                     .any(|t| t.sequential_download);
                 if let Err(e) = self.client.set_sequential(&ids, !any_sequential) {
-                    self.last_error = Some(e);
+                    self.set_error(e);
                 }
                 self.selected.clear();
             }
@@ -820,7 +837,7 @@ impl App {
                         Some(location.as_str())
                     };
                     if let Err(e) = self.client.add(&url, dir) {
-                        self.last_error = Some(e);
+                        self.set_error(e);
                     }
                     self.modal = None;
                 }
@@ -830,7 +847,7 @@ impl App {
                         let ids = self.target_ids();
                         // we move the files by default when changing location from UI
                         if let Err(e) = self.client.set_location(&ids, &location, true) {
-                            self.last_error = Some(e);
+                            self.set_error(e);
                         }
                         self.selected.clear();
                     }
@@ -954,7 +971,7 @@ impl App {
                 .filter(|s| !s.is_empty())
                 .collect();
             if let Err(e) = self.client.set_labels(&ids, &labels) {
-                self.last_error = Some(e);
+                self.set_error(e);
             } else {
                 self.refresh_torrents();
             }
@@ -1037,7 +1054,7 @@ impl App {
             && let Some(t) = &self.detail_torrent
             && let Err(e) = self.client.reannounce(&[t.id])
         {
-            self.last_error = Some(e);
+            self.set_error(e);
         }
     }
 
@@ -1067,7 +1084,7 @@ impl App {
         }
 
         if let Err(e) = self.client.set_file_priorities(tid, &changes) {
-            self.last_error = Some(e);
+            self.set_error(e);
             return;
         }
         self.file_selected.clear();
@@ -1100,7 +1117,7 @@ impl App {
         }
 
         if let Err(e) = self.client.set_file_priorities(tid, &changes) {
-            self.last_error = Some(e);
+            self.set_error(e);
             return;
         }
         self.file_selected.clear();
@@ -1139,7 +1156,7 @@ impl App {
         };
         let dir = &torrent.download_dir;
         if dir.is_empty() {
-            self.last_error = Some("unknown download directory".into());
+            self.set_error("unknown download directory");
             return;
         }
         let indices = self.file_target_indices();
@@ -1157,7 +1174,7 @@ impl App {
             }
         }
         if !errors.is_empty() {
-            self.last_error = Some(errors.join("; "));
+            self.set_error(errors.join("; "));
         }
         self.file_selected.clear();
     }
@@ -1178,7 +1195,7 @@ impl App {
             && let Some(t) = &self.detail_torrent
             && let Err(e) = self.client.reannounce(&[t.id])
         {
-            self.last_error = Some(e);
+            self.set_error(e);
         }
     }
 
@@ -1255,6 +1272,7 @@ impl App {
                         View::Rsync => self.refresh_rsync(),
                     }
                 }
+                self.tick_autoclear();
                 last_tick = Instant::now();
             }
         }
@@ -3055,7 +3073,7 @@ mod tests {
             TransmissionClient::new("http://dummy", None, None),
             Config::default(),
         );
-        app.set_error("HTTP 401 Unauthorized".into());
+        app.set_error("HTTP 401 Unauthorized");
         assert!(matches!(app.modal, Some(Modal::Auth { .. })));
         assert!(app.last_error.is_none());
     }
@@ -3066,7 +3084,7 @@ mod tests {
             TransmissionClient::new("http://dummy", None, None),
             Config::default(),
         );
-        app.set_error("connection refused".into());
+        app.set_error("connection refused");
         assert!(app.modal.is_none());
         assert_eq!(app.last_error.as_deref(), Some("connection refused"));
     }
@@ -3083,7 +3101,7 @@ mod tests {
             focused: AuthField::Password,
         });
         // A second 401 while the modal is already open should not reset it.
-        app.set_error("HTTP 401 Unauthorized".into());
+        app.set_error("HTTP 401 Unauthorized");
         assert!(matches!(
             app.modal,
             Some(Modal::Auth { ref username, .. }) if username == "alice"
@@ -3250,5 +3268,83 @@ mod tests {
         });
         app.handle_auth_input(make_key(KeyCode::Enter, KeyModifiers::NONE));
         assert!(app.modal.is_none());
+    }
+
+    #[test]
+    fn test_set_error_sets_error_since() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        assert!(app.error_since.is_none());
+        app.set_error("something broke");
+        assert!(app.error_since.is_some());
+        assert_eq!(app.last_error.as_deref(), Some("something broke"));
+    }
+
+    #[test]
+    fn test_set_error_401_does_not_set_error_since() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.set_error("HTTP 401 Unauthorized");
+        assert!(app.error_since.is_none());
+        assert!(app.last_error.is_none());
+    }
+
+    #[test]
+    fn test_tick_autoclear_clears_after_expiry() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.last_error = Some("stale error".into());
+        // Simulate an error that occurred 11 seconds ago.
+        app.error_since = Some(Instant::now() - Duration::from_secs(11));
+        app.tick_autoclear();
+        assert!(app.last_error.is_none());
+        assert!(app.error_since.is_none());
+    }
+
+    #[test]
+    fn test_tick_autoclear_does_not_clear_recent_error() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.last_error = Some("fresh error".into());
+        app.error_since = Some(Instant::now());
+        app.tick_autoclear();
+        assert_eq!(app.last_error.as_deref(), Some("fresh error"));
+        assert!(app.error_since.is_some());
+    }
+
+    #[test]
+    fn test_tick_autoclear_noop_when_no_error() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.tick_autoclear();
+        assert!(app.last_error.is_none());
+        assert!(app.error_since.is_none());
+    }
+
+    #[test]
+    fn test_drain_results_success_clears_error_since() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.last_error = Some("prior error".into());
+        app.error_since = Some(Instant::now());
+        app.refresh_in_flight = true;
+        app.refresh_tx
+            .send(RefreshMsg::Torrents(Ok(vec![])))
+            .unwrap();
+        app.drain_results();
+        assert!(app.last_error.is_none());
+        assert!(app.error_since.is_none());
     }
 }
