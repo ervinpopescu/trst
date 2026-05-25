@@ -10,10 +10,25 @@ use crate::app::App;
 use crate::config::parse_color;
 
 pub fn draw(f: &mut Frame, app: &App, area: Rect) {
-    let state = &app.rsync_state;
     let th = &app.theme;
     let accent = parse_color(&th.selected.fg);
 
+    if !app.is_local_daemon() {
+        let msg = Paragraph::new(Line::from(Span::styled(
+            " rsync-torrents data unavailable for remote daemons ",
+            Style::default().fg(Color::DarkGray),
+        )))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" rsync-torrents ")
+                .border_style(Style::default().fg(accent)),
+        );
+        f.render_widget(msg, area);
+        return;
+    }
+
+    let state = &app.rsync_state;
     let chunks = Layout::vertical([
         Constraint::Percentage(35),
         Constraint::Percentage(45),

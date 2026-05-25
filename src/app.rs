@@ -916,7 +916,7 @@ impl App {
         self.refresh_detail();
     }
 
-    fn is_local_daemon(&self) -> bool {
+    pub fn is_local_daemon(&self) -> bool {
         let url = &self.client.url;
         // Parse the host from the URL (e.g. "http://127.0.0.1:9091/transmission/rpc")
         let host = if let Some(after_scheme) = url.find("://").map(|i| &url[i + 3..]) {
