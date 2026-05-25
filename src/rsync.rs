@@ -1,16 +1,15 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Runtime state read from rsync-torrents data files on every tick.
 #[derive(Default, Clone)]
 pub struct RsyncState {
     /// Hashes recorded in SYNCED_HASHES, newest-first.
     pub synced_hashes: Vec<String>,
-    /// Last N lines of the sync log.
+    /// Last N lines of the sync log, newest-first.
     pub log_lines: Vec<String>,
-    /// Seconds the daemon has been idle (None if active or state file missing).
-    pub idle_seconds: Option<u64>,
+    /// Unix timestamp from last-active file (None if file is missing/unreadable).
+    pub last_active_ts: Option<u64>,
     pub idle_threshold: u64,
 }
 
@@ -71,20 +70,17 @@ fn tail_log(path: &Path, n: usize) -> Vec<String> {
         return Vec::new();
     };
     let lines: Vec<&str> = text.lines().collect();
-    lines[lines.len().saturating_sub(n)..]
+    let mut result: Vec<String> = lines[lines.len().saturating_sub(n)..]
         .iter()
         .map(|l| l.to_string())
-        .collect()
+        .collect();
+    result.reverse();
+    result
 }
 
-fn read_idle(state_path: &Path) -> Option<u64> {
+fn read_last_active_ts(state_path: &Path) -> Option<u64> {
     let text = fs::read_to_string(state_path).ok()?;
-    let last_active: u64 = text.trim().parse().ok()?;
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or(Duration::ZERO)
-        .as_secs();
-    Some(now.saturating_sub(last_active))
+    text.trim().parse().ok()
 }
 
 impl RsyncState {
@@ -92,7 +88,7 @@ impl RsyncState {
         Self {
             synced_hashes: read_hashes(&hashes_path()),
             log_lines: tail_log(&log_path(), LOG_TAIL),
-            idle_seconds: read_idle(&state_file_path()),
+            last_active_ts: read_last_active_ts(&state_file_path()),
             idle_threshold: idle_threshold_from_config(),
         }
     }

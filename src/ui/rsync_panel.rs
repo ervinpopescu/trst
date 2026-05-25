@@ -1,3 +1,5 @@
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Style};
@@ -42,18 +44,23 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
     let log_list = List::new(log_items).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" Sync log (last 100 lines) ")
+            .title(" Sync log (newest first) ")
             .border_style(Style::default().fg(accent)),
     );
     f.render_widget(log_list, chunks[1]);
 
     // --- Idle countdown ---
-    let idle_line = match state.idle_seconds {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_secs();
+    let idle_line = match state.last_active_ts {
         None => Line::from(Span::styled(
-            " transmission not running ",
+            " rsync-torrents: no state file found ",
             Style::default().fg(Color::DarkGray),
         )),
-        Some(idle) => {
+        Some(ts) => {
+            let idle = now.saturating_sub(ts);
             let threshold = state.idle_threshold;
             let remaining = threshold.saturating_sub(idle);
             let color = if idle >= threshold {
