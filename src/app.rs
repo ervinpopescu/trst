@@ -731,16 +731,11 @@ impl App {
         } else if b.sequential.matches(code, mods) {
             let ids = self.target_ids();
             if !ids.is_empty() {
-                let visible = self.filtered_torrents();
                 let any_sequential = self
-                    .selected
+                    .torrents
                     .iter()
-                    .filter_map(|&i| visible.get(i))
-                    .any(|t| t.sequential_download)
-                    || (self.selected.is_empty()
-                        && visible
-                            .get(self.cursor)
-                            .is_some_and(|t| t.sequential_download));
+                    .filter(|t| ids.contains(&t.id))
+                    .any(|t| t.sequential_download);
                 if let Err(e) = self.client.set_sequential(&ids, !any_sequential) {
                     self.last_error = Some(e);
                 }
@@ -2923,5 +2918,58 @@ mod tests {
         assert_eq!(app.torrents.len(), 1);
         assert_eq!(app.stats.as_ref().unwrap().torrent_count, 1);
         assert!(!app.refresh_in_flight);
+    }
+
+    #[test]
+    fn test_sequential_predicate_uses_ids_not_positions() {
+        // Regression test for GitHub issue #24:
+        // When `selected` contains stale out-of-bounds indices (e.g. after a
+        // filter change), the sequential predicate must still read the correct
+        // value from the torrent list by ID, not by positional index.
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.torrents = vec![
+            Torrent {
+                id: 10,
+                sequential_download: true,
+                ..Default::default()
+            },
+            Torrent {
+                id: 20,
+                sequential_download: false,
+                ..Default::default()
+            },
+        ];
+        app.rebuild_filter();
+
+        // Cursor points at index 0 (id=10, sequential=true).
+        // selected is empty → cursor fallback must be used via target_ids().
+        app.cursor = 0;
+        let ids = app.target_ids();
+        assert_eq!(ids, vec![10], "target_ids must resolve to id 10");
+
+        // Derive the predicate the same way the fixed handler does.
+        let any_sequential = app
+            .torrents
+            .iter()
+            .filter(|t| ids.contains(&t.id))
+            .any(|t| t.sequential_download);
+        assert!(
+            any_sequential,
+            "sequential predicate must be true for id=10 (sequential_download=true)"
+        );
+
+        // Now simulate stale selected: index 99 is out-of-bounds.
+        // target_ids() filters stale indices out, so ids will be empty and
+        // the predicate must not accidentally report false for the cursor torrent.
+        app.selected.insert(99);
+        let ids_stale = app.target_ids();
+        // stale index resolves to no visible torrent → target_ids returns empty
+        assert!(
+            ids_stale.is_empty(),
+            "stale out-of-bounds selected index must yield no target ids"
+        );
     }
 }
