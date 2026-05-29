@@ -37,12 +37,26 @@ pub enum Confirm {
     DeleteFileFromDisk,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AuthField {
+    Username,
+    Password,
+}
+
 pub enum Modal {
     AddUrl(String),
-    AddLocation { url: String, location: String },
+    AddLocation {
+        url: String,
+        location: String,
+    },
     ChangeLocation(String),
     Filter,
     Confirm(Confirm),
+    Auth {
+        username: String,
+        password: String,
+        focused: AuthField,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -283,6 +297,18 @@ impl App {
         }
     }
 
+    fn set_error(&mut self, e: String) {
+        if e == "HTTP 401 Unauthorized" && !matches!(self.modal, Some(Modal::Auth { .. })) {
+            self.modal = Some(Modal::Auth {
+                username: String::new(),
+                password: String::new(),
+                focused: AuthField::Username,
+            });
+        } else {
+            self.last_error = Some(e);
+        }
+    }
+
     fn refresh_torrents(&mut self) {
         match self.client.get_torrents(TORRENT_LIST_FIELDS) {
             Ok(mut list) => {
@@ -292,7 +318,7 @@ impl App {
                 self.clamp_cursor();
                 self.last_error = None;
             }
-            Err(e) => self.last_error = Some(e),
+            Err(e) => self.set_error(e),
         }
     }
 
@@ -311,7 +337,7 @@ impl App {
                 self.file_selected.clear();
                 self.view = View::TorrentList;
             }
-            Err(e) => self.last_error = Some(e),
+            Err(e) => self.set_error(e),
         }
     }
 
@@ -387,7 +413,7 @@ impl App {
                         self.clamp_cursor();
                         self.last_error = None;
                     }
-                    Err(e) => self.last_error = Some(e),
+                    Err(e) => self.set_error(e),
                 },
                 RefreshMsg::Detail(result) => match *result {
                     Ok(Some(t)) => {
@@ -398,7 +424,7 @@ impl App {
                         self.detail_torrent = None;
                         self.view = View::TorrentList;
                     }
-                    Err(e) => self.last_error = Some(e),
+                    Err(e) => self.set_error(e),
                 },
                 RefreshMsg::Stats {
                     stats,
@@ -504,6 +530,10 @@ impl App {
 
     fn handle_torrent_list_key(&mut self, key: KeyEvent) {
         match &self.modal {
+            Some(Modal::Auth { .. }) => {
+                self.handle_auth_input(key);
+                return;
+            }
             Some(Modal::AddUrl(_))
             | Some(Modal::AddLocation { .. })
             | Some(Modal::ChangeLocation(_)) => {
@@ -850,6 +880,66 @@ impl App {
                 }
                 _ => {}
             },
+            _ => {}
+        }
+    }
+
+    fn handle_auth_input(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.modal = None;
+            }
+            KeyCode::Tab => {
+                if let Some(Modal::Auth {
+                    ref mut focused, ..
+                }) = self.modal
+                {
+                    *focused = match *focused {
+                        AuthField::Username => AuthField::Password,
+                        AuthField::Password => AuthField::Username,
+                    };
+                }
+            }
+            KeyCode::Enter => {
+                let (username, password) = match self.modal.take() {
+                    Some(Modal::Auth {
+                        username, password, ..
+                    }) => (username, password),
+                    _ => return,
+                };
+                self.client.set_auth(&username, &password);
+                self.refresh_torrents();
+            }
+            KeyCode::Backspace => {
+                if let Some(Modal::Auth {
+                    ref mut username,
+                    ref mut password,
+                    focused,
+                }) = self.modal
+                {
+                    match focused {
+                        AuthField::Username => {
+                            username.pop();
+                        }
+                        AuthField::Password => {
+                            password.pop();
+                        }
+                    }
+                }
+            }
+            KeyCode::Char(c) => {
+                if let Some(Modal::Auth {
+                    ref mut username,
+                    ref mut password,
+                    focused,
+                }) = self.modal
+                {
+                    match focused {
+                        AuthField::Username => username.push(c),
+                        AuthField::Password => password.push(c),
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -2922,10 +3012,6 @@ mod tests {
 
     #[test]
     fn test_sequential_predicate_uses_ids_not_positions() {
-        // Regression test for GitHub issue #24:
-        // When `selected` contains stale out-of-bounds indices (e.g. after a
-        // filter change), the sequential predicate must still read the correct
-        // value from the torrent list by ID, not by positional index.
         let mut app = App::new(
             TransmissionClient::new("http://dummy", None, None),
             Config::default(),
@@ -2943,14 +3029,9 @@ mod tests {
             },
         ];
         app.rebuild_filter();
-
-        // Cursor points at index 0 (id=10, sequential=true).
-        // selected is empty → cursor fallback must be used via target_ids().
         app.cursor = 0;
         let ids = app.target_ids();
         assert_eq!(ids, vec![10], "target_ids must resolve to id 10");
-
-        // Derive the predicate the same way the fixed handler does.
         let any_sequential = app
             .torrents
             .iter()
@@ -2960,16 +3041,136 @@ mod tests {
             any_sequential,
             "sequential predicate must be true for id=10 (sequential_download=true)"
         );
-
-        // Now simulate stale selected: index 99 is out-of-bounds.
-        // target_ids() filters stale indices out, so ids will be empty and
-        // the predicate must not accidentally report false for the cursor torrent.
         app.selected.insert(99);
         let ids_stale = app.target_ids();
-        // stale index resolves to no visible torrent → target_ids returns empty
         assert!(
             ids_stale.is_empty(),
             "stale out-of-bounds selected index must yield no target ids"
         );
+    }
+
+    #[test]
+    fn test_set_error_opens_auth_modal_on_401() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.set_error("HTTP 401 Unauthorized".into());
+        assert!(matches!(app.modal, Some(Modal::Auth { .. })));
+        assert!(app.last_error.is_none());
+    }
+
+    #[test]
+    fn test_set_error_sets_last_error_for_non_401() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.set_error("connection refused".into());
+        assert!(app.modal.is_none());
+        assert_eq!(app.last_error.as_deref(), Some("connection refused"));
+    }
+
+    #[test]
+    fn test_set_error_does_not_replace_open_auth_modal() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.modal = Some(Modal::Auth {
+            username: "alice".into(),
+            password: "secret".into(),
+            focused: AuthField::Password,
+        });
+        // A second 401 while the modal is already open should not reset it.
+        app.set_error("HTTP 401 Unauthorized".into());
+        assert!(matches!(
+            app.modal,
+            Some(Modal::Auth { ref username, .. }) if username == "alice"
+        ));
+    }
+
+    #[test]
+    fn test_auth_modal_tab_switches_field() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.modal = Some(Modal::Auth {
+            username: String::new(),
+            password: String::new(),
+            focused: AuthField::Username,
+        });
+        app.handle_auth_input(make_key(KeyCode::Tab, KeyModifiers::NONE));
+        assert!(matches!(
+            app.modal,
+            Some(Modal::Auth {
+                focused: AuthField::Password,
+                ..
+            })
+        ));
+        app.handle_auth_input(make_key(KeyCode::Tab, KeyModifiers::NONE));
+        assert!(matches!(
+            app.modal,
+            Some(Modal::Auth {
+                focused: AuthField::Username,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn test_auth_modal_char_input_routes_to_focused_field() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.modal = Some(Modal::Auth {
+            username: String::new(),
+            password: String::new(),
+            focused: AuthField::Username,
+        });
+        app.handle_auth_input(make_key(KeyCode::Char('u'), KeyModifiers::NONE));
+        app.handle_auth_input(make_key(KeyCode::Tab, KeyModifiers::NONE));
+        app.handle_auth_input(make_key(KeyCode::Char('p'), KeyModifiers::NONE));
+        match &app.modal {
+            Some(Modal::Auth {
+                username, password, ..
+            }) => {
+                assert_eq!(username, "u");
+                assert_eq!(password, "p");
+            }
+            _ => panic!("expected Auth modal"),
+        }
+    }
+
+    #[test]
+    fn test_auth_modal_esc_closes_modal() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.modal = Some(Modal::Auth {
+            username: "u".into(),
+            password: "p".into(),
+            focused: AuthField::Username,
+        });
+        app.handle_auth_input(make_key(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(app.modal.is_none());
+    }
+
+    #[test]
+    fn test_drain_results_401_opens_auth_modal() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.refresh_in_flight = true;
+        app.refresh_tx
+            .send(RefreshMsg::Torrents(Err("HTTP 401 Unauthorized".into())))
+            .unwrap();
+        app.drain_results();
+        assert!(matches!(app.modal, Some(Modal::Auth { .. })));
+        assert!(app.last_error.is_none());
     }
 }

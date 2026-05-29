@@ -12,7 +12,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
-use crate::app::{App, Confirm, Modal, View};
+use crate::app::{App, AuthField, Confirm, Modal, View};
 use crate::config::parse_color;
 use crate::util;
 
@@ -67,6 +67,11 @@ pub fn draw(f: &mut Frame, app: &App) {
             )
         }
         Some(Modal::Filter) => draw_input(f, "Filter:", &app.filter_input, f.area(), None),
+        Some(Modal::Auth {
+            username,
+            password,
+            focused,
+        }) => draw_auth_modal(f, username, password, *focused, f.area()),
         None => {}
     }
 }
@@ -210,6 +215,43 @@ fn draw_input(
             comp_popup,
         );
     }
+}
+
+fn draw_auth_modal(f: &mut Frame, username: &str, password: &str, focused: AuthField, area: Rect) {
+    let masked: String = "•".repeat(password.chars().count());
+    let user_cursor = if focused == AuthField::Username {
+        "█"
+    } else {
+        " "
+    };
+    let pass_cursor = if focused == AuthField::Password {
+        "█"
+    } else {
+        " "
+    };
+    let user_line = format!("Username: {username}{user_cursor}");
+    let pass_line = format!("Password: {masked}{pass_cursor}");
+
+    let width = (user_line.width().max(pass_line.width()) as u16 + 4).min(area.width);
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + area.height / 2 - 1;
+    let popup = Rect::new(x, y, width, 4);
+
+    f.render_widget(Clear, popup);
+    f.render_widget(
+        Paragraph::new(vec![
+            Line::from(Span::raw(user_line)),
+            Line::from(Span::raw(pass_line)),
+        ])
+        .block(
+            Block::default()
+                .title("Authentication required")
+                .borders(Borders::ALL)
+                .style(Style::default().fg(Color::Yellow)),
+        )
+        .alignment(ratatui::layout::Alignment::Left),
+        popup,
+    );
 }
 
 #[cfg(test)]
@@ -405,6 +447,19 @@ mod tests {
     fn test_draw_modal_change_location() {
         let mut app = make_app();
         app.modal = Some(Modal::ChangeLocation("/tmp/new".into()));
+        let mut term = make_terminal();
+        term.draw(|f| super::draw(f, &app)).unwrap();
+    }
+
+    #[test]
+    fn test_draw_modal_auth() {
+        use crate::app::AuthField;
+        let mut app = make_app();
+        app.modal = Some(Modal::Auth {
+            username: "alice".into(),
+            password: "secret".into(),
+            focused: AuthField::Password,
+        });
         let mut term = make_terminal();
         term.draw(|f| super::draw(f, &app)).unwrap();
     }
