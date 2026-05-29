@@ -3173,4 +3173,82 @@ mod tests {
         assert!(matches!(app.modal, Some(Modal::Auth { .. })));
         assert!(app.last_error.is_none());
     }
+
+    #[test]
+    fn test_drain_results_detail_401_opens_auth_modal() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.refresh_in_flight = true;
+        app.refresh_tx
+            .send(RefreshMsg::Detail(Box::new(Err(
+                "HTTP 401 Unauthorized".into()
+            ))))
+            .unwrap();
+        app.drain_results();
+        assert!(matches!(app.modal, Some(Modal::Auth { .. })));
+        assert!(app.last_error.is_none());
+    }
+
+    #[test]
+    fn test_auth_modal_backspace_username() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.modal = Some(Modal::Auth {
+            username: "ab".into(),
+            password: "xy".into(),
+            focused: AuthField::Username,
+        });
+        app.handle_auth_input(make_key(KeyCode::Backspace, KeyModifiers::NONE));
+        match &app.modal {
+            Some(Modal::Auth {
+                username, password, ..
+            }) => {
+                assert_eq!(username, "a");
+                assert_eq!(password, "xy");
+            }
+            _ => panic!("expected Auth modal"),
+        }
+    }
+
+    #[test]
+    fn test_auth_modal_backspace_password() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.modal = Some(Modal::Auth {
+            username: "ab".into(),
+            password: "xy".into(),
+            focused: AuthField::Password,
+        });
+        app.handle_auth_input(make_key(KeyCode::Backspace, KeyModifiers::NONE));
+        match &app.modal {
+            Some(Modal::Auth {
+                username, password, ..
+            }) => {
+                assert_eq!(username, "ab");
+                assert_eq!(password, "x");
+            }
+            _ => panic!("expected Auth modal"),
+        }
+    }
+
+    #[test]
+    fn test_auth_modal_enter_closes_modal() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.modal = Some(Modal::Auth {
+            username: "user".into(),
+            password: "pass".into(),
+            focused: AuthField::Username,
+        });
+        app.handle_auth_input(make_key(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(app.modal.is_none());
+    }
 }
