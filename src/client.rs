@@ -8,7 +8,7 @@ use crate::protocol::*;
 pub struct TransmissionClient {
     agent: ureq::Agent,
     pub url: String,
-    auth_header: Option<String>,
+    auth_header: Mutex<Option<String>>,
     session_id: Mutex<Option<String>>,
 }
 
@@ -31,8 +31,17 @@ impl TransmissionClient {
         Self {
             agent,
             url: url.to_string(),
-            auth_header,
+            auth_header: Mutex::new(auth_header),
             session_id: Mutex::new(None),
+        }
+    }
+
+    pub fn set_auth(&self, username: &str, password: &str) {
+        let encoded =
+            base64::engine::general_purpose::STANDARD.encode(format!("{username}:{password}"));
+        *self.auth_header.lock().unwrap() = Some(format!("Basic {encoded}"));
+        if let Ok(entry) = keyring::Entry::new("trst", &self.url) {
+            let _ = entry.set_password(&format!("{username}\n{password}"));
         }
     }
 
@@ -51,7 +60,7 @@ impl TransmissionClient {
                 .post(&self.url)
                 .header("Content-Type", "application/json");
 
-            if let Some(auth) = &self.auth_header {
+            if let Some(auth) = self.auth_header.lock().unwrap().clone() {
                 req = req.header("Authorization", auth);
             }
             if let Some(sid) = self.session_id.lock().unwrap().as_deref() {
