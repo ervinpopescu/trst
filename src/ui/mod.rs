@@ -229,10 +229,12 @@ fn draw_auth_modal(f: &mut Frame, username: &str, password: &str, focused: AuthF
     } else {
         " "
     };
-    let user_line = format!("Username: {username}{user_cursor}");
-    let pass_line = format!("Password: {masked}{pass_cursor}");
+    let user_line = format!(" Username: {username}{user_cursor}");
+    let pass_line = format!(" Password: {masked}{pass_cursor}");
 
-    let width = (user_line.width().max(pass_line.width()) as u16 + 4).min(area.width);
+    let width = (user_line.width().max(pass_line.width()) as u16 + 4)
+        .max(44)
+        .min(area.width);
     let x = area.x + (area.width.saturating_sub(width)) / 2;
     let y = area.y + area.height / 2 - 1;
     let popup = Rect::new(x, y, width, 4);
@@ -452,7 +454,7 @@ mod tests {
     }
 
     #[test]
-    fn test_draw_modal_auth() {
+    fn test_draw_modal_auth_password_focused() {
         use crate::app::AuthField;
         let mut app = make_app();
         app.modal = Some(Modal::Auth {
@@ -461,6 +463,32 @@ mod tests {
             focused: AuthField::Password,
         });
         let mut term = make_terminal();
+        term.draw(|f| super::draw(f, &app)).unwrap();
+    }
+
+    #[test]
+    fn test_draw_modal_auth_username_focused() {
+        use crate::app::AuthField;
+        let mut app = make_app();
+        app.modal = Some(Modal::Auth {
+            username: String::new(),
+            password: String::new(),
+            focused: AuthField::Username,
+        });
+        let mut term = make_terminal();
+        term.draw(|f| super::draw(f, &app)).unwrap();
+    }
+
+    #[test]
+    fn test_draw_modal_auth_narrow_terminal_clamps_width() {
+        use crate::app::AuthField;
+        let mut app = make_app();
+        app.modal = Some(Modal::Auth {
+            username: "u".into(),
+            password: "p".into(),
+            focused: AuthField::Username,
+        });
+        let mut term = Terminal::new(TestBackend::new(30, 10)).unwrap();
         term.draw(|f| super::draw(f, &app)).unwrap();
     }
 

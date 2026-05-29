@@ -265,3 +265,32 @@ impl TransmissionClient {
         serde_json::from_value(resp.arguments).map_err(|e: serde_json::Error| e.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_set_auth_updates_header() {
+        let client = TransmissionClient::new("http://dummy", None, None);
+        assert!(client.auth_header.lock().unwrap().is_none());
+        client.set_auth("alice", "secret");
+        let header = client.auth_header.lock().unwrap().clone().unwrap();
+        assert!(header.starts_with("Basic "));
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(header.strip_prefix("Basic ").unwrap())
+            .unwrap();
+        assert_eq!(String::from_utf8(decoded).unwrap(), "alice:secret");
+    }
+
+    #[test]
+    fn test_set_auth_replaces_existing_header() {
+        let client = TransmissionClient::new("http://dummy", Some(("old", "creds")), None);
+        client.set_auth("new", "pass");
+        let header = client.auth_header.lock().unwrap().clone().unwrap();
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(header.strip_prefix("Basic ").unwrap())
+            .unwrap();
+        assert_eq!(String::from_utf8(decoded).unwrap(), "new:pass");
+    }
+}

@@ -284,4 +284,18 @@ mod tests {
         ]));
         assert_eq!(a.url, "http://explicit/transmission/rpc");
     }
+
+    #[test]
+    fn test_parse_args_clear_auth_flag() {
+        let a = parse_args_from(args(&["--clear-auth"]));
+        assert!(a.clear_auth);
+        assert!(a.url.is_empty());
+    }
+
+    #[test]
+    fn test_parse_args_clear_auth_with_host() {
+        let a = parse_args_from(args(&["myserver:9092", "--clear-auth"]));
+        assert!(a.clear_auth);
+        assert_eq!(a.url, "http://myserver:9092/transmission/rpc");
+    }
 }
