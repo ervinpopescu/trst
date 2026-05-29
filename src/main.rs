@@ -11,6 +11,7 @@ struct Args {
     url: String,
     username: Option<String>,
     password: Option<String>,
+    clear_auth: bool,
 }
 
 fn parse_args() -> Args {
@@ -25,6 +26,7 @@ where
         url: String::new(),
         username: None,
         password: None,
+        clear_auth: false,
     };
     let mut host = None;
     let mut iter = iter.peekable();
@@ -43,6 +45,9 @@ where
                     "warning: passing password via -p is visible in process listings and shell history"
                 );
             }
+            "--clear-auth" => {
+                args.clear_auth = true;
+            }
             "-h" | "--help" => {
                 println!("trst — Transmission remote TUI\n");
                 println!("Usage: trst [HOST[:PORT]] [OPTIONS]\n");
@@ -54,6 +59,9 @@ where
                 println!("  -u, --url <URL>        Full RPC URL (overrides positional)");
                 println!("  -n, --username <USER>  Username for authentication");
                 println!("  -p, --password <PASS>  Password for authentication");
+                println!(
+                    "      --clear-auth       Remove saved credentials for the resolved URL and exit"
+                );
                 println!("  -h, --help             Print help");
                 std::process::exit(0);
             }
@@ -123,6 +131,21 @@ fn main() -> std::io::Result<()> {
     } else {
         "http://localhost:9091/transmission/rpc".to_string()
     };
+
+    if args.clear_auth {
+        match keyring::Entry::new("trst", &url) {
+            Ok(entry) => match entry.delete_credential() {
+                Ok(()) => println!("Credentials for {url} removed."),
+                Err(keyring::Error::NoEntry) => println!("No credentials stored for {url}."),
+                Err(e) => eprintln!("error: {e}"),
+            },
+            Err(e) => eprintln!("error: {e}"),
+        }
+        config.connection.username = None;
+        config.connection.password = None;
+        config.save();
+        return Ok(());
+    }
 
     let cli_username = args
         .username
