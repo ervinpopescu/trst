@@ -917,7 +917,40 @@ impl App {
                     };
                 }
             }
+            KeyCode::Down => {
+                if let Some(Modal::Auth {
+                    ref mut focused, ..
+                }) = self.modal
+                    && *focused == AuthField::Username
+                {
+                    *focused = AuthField::Password;
+                }
+            }
+            KeyCode::Up => {
+                if let Some(Modal::Auth {
+                    ref mut focused, ..
+                }) = self.modal
+                    && *focused == AuthField::Password
+                {
+                    *focused = AuthField::Username;
+                }
+            }
             KeyCode::Enter => {
+                if matches!(
+                    self.modal,
+                    Some(Modal::Auth {
+                        focused: AuthField::Username,
+                        ..
+                    })
+                ) {
+                    if let Some(Modal::Auth {
+                        ref mut focused, ..
+                    }) = self.modal
+                    {
+                        *focused = AuthField::Password;
+                    }
+                    return;
+                }
                 let (username, password) = match self.modal.take() {
                     Some(Modal::Auth {
                         username, password, ..
@@ -3256,7 +3289,7 @@ mod tests {
     }
 
     #[test]
-    fn test_auth_modal_enter_closes_modal() {
+    fn test_auth_modal_enter_on_username_advances_to_password() {
         let mut app = App::new(
             TransmissionClient::new("http://dummy", None, None),
             Config::default(),
@@ -3267,7 +3300,112 @@ mod tests {
             focused: AuthField::Username,
         });
         app.handle_auth_input(make_key(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(
+            app.modal,
+            Some(Modal::Auth {
+                focused: AuthField::Password,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn test_auth_modal_enter_on_password_submits() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.modal = Some(Modal::Auth {
+            username: "user".into(),
+            password: "pass".into(),
+            focused: AuthField::Password,
+        });
+        app.handle_auth_input(make_key(KeyCode::Enter, KeyModifiers::NONE));
         assert!(app.modal.is_none());
+    }
+
+    #[test]
+    fn test_auth_modal_down_advances_field() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.modal = Some(Modal::Auth {
+            username: String::new(),
+            password: String::new(),
+            focused: AuthField::Username,
+        });
+        app.handle_auth_input(make_key(KeyCode::Down, KeyModifiers::NONE));
+        assert!(matches!(
+            app.modal,
+            Some(Modal::Auth {
+                focused: AuthField::Password,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn test_auth_modal_down_noop_on_password() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.modal = Some(Modal::Auth {
+            username: String::new(),
+            password: String::new(),
+            focused: AuthField::Password,
+        });
+        app.handle_auth_input(make_key(KeyCode::Down, KeyModifiers::NONE));
+        assert!(matches!(
+            app.modal,
+            Some(Modal::Auth {
+                focused: AuthField::Password,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn test_auth_modal_up_reverses_field() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.modal = Some(Modal::Auth {
+            username: String::new(),
+            password: String::new(),
+            focused: AuthField::Password,
+        });
+        app.handle_auth_input(make_key(KeyCode::Up, KeyModifiers::NONE));
+        assert!(matches!(
+            app.modal,
+            Some(Modal::Auth {
+                focused: AuthField::Username,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn test_auth_modal_up_noop_on_username() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.modal = Some(Modal::Auth {
+            username: String::new(),
+            password: String::new(),
+            focused: AuthField::Username,
+        });
+        app.handle_auth_input(make_key(KeyCode::Up, KeyModifiers::NONE));
+        assert!(matches!(
+            app.modal,
+            Some(Modal::Auth {
+                focused: AuthField::Username,
+                ..
+            })
+        ));
     }
 
     #[test]
