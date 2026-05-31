@@ -7,6 +7,7 @@ use ratatui::DefaultTerminal;
 
 use crate::client::TransmissionClient;
 use crate::config::{Bindings, Config, ThemeConfig};
+use crate::credentials;
 use crate::protocol::*;
 use crate::ui;
 use crate::util;
@@ -14,6 +15,7 @@ use crate::util;
 enum RefreshMsg {
     Torrents(Result<Vec<Torrent>, String>),
     Detail(Box<Result<Option<Torrent>, String>>),
+    KeyringError(String),
     Stats {
         stats: Option<SessionStats>,
         free: Option<FreeSpace>,
@@ -432,6 +434,7 @@ impl App {
                     }
                     Err(e) => self.set_error(e),
                 },
+                RefreshMsg::KeyringError(e) => self.set_error(e),
                 RefreshMsg::Detail(result) => match *result {
                     Ok(Some(t)) => {
                         self.detail_torrent = Some(t);
@@ -925,6 +928,15 @@ impl App {
                     _ => return,
                 };
                 self.client.set_auth(&username, &password);
+                let url = self.client.url.clone();
+                let tx = self.refresh_tx.clone();
+                std::thread::spawn(move || {
+                    if let Err(e) = credentials::save(&url, &username, &password) {
+                        let _ = tx.try_send(RefreshMsg::KeyringError(format!(
+                            "keyring save failed: {e}"
+                        )));
+                    }
+                });
                 self.refresh_torrents();
             }
             KeyCode::Backspace => {

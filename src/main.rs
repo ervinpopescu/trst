@@ -1,6 +1,7 @@
 mod app;
 mod client;
 mod config;
+mod credentials;
 mod protocol;
 #[cfg(feature = "rsync")]
 mod rsync;
@@ -93,33 +94,6 @@ where
     args
 }
 
-/// Returns `(username, password)` loaded from the OS keyring for `url`, or `None`.
-fn load_keyring_credentials(url: &str) -> Option<(String, String)> {
-    let entry = keyring::Entry::new("trst", url).ok()?;
-    let secret = entry.get_password().ok()?;
-    let mut parts = secret.splitn(2, '\n');
-    let user = parts.next()?.to_string();
-    let pass = parts.next()?.to_string();
-    Some((user, pass))
-}
-
-/// Saves `username` and `password` to the OS keyring for `url`. Returns true if successful.
-fn save_keyring_credentials(url: &str, username: &str, password: &str) -> bool {
-    match keyring::Entry::new("trst", url) {
-        Ok(entry) => match entry.set_password(&format!("{username}\n{password}")) {
-            Ok(_) => true,
-            Err(e) => {
-                eprintln!("warning: failed to save credentials to keyring: {e}");
-                false
-            }
-        },
-        Err(e) => {
-            eprintln!("warning: failed to access keyring: {e}");
-            false
-        }
-    }
-}
-
 fn main() -> std::io::Result<()> {
     let mut config = config::Config::load();
     let args = parse_args();
@@ -133,12 +107,9 @@ fn main() -> std::io::Result<()> {
     };
 
     if args.clear_auth {
-        match keyring::Entry::new("trst", &url) {
-            Ok(entry) => match entry.delete_credential() {
-                Ok(()) => println!("Credentials for {url} removed."),
-                Err(keyring::Error::NoEntry) => println!("No credentials stored for {url}."),
-                Err(e) => eprintln!("error: {e}"),
-            },
+        match credentials::delete(&url) {
+            Ok(true) => println!("Credentials for {url} removed."),
+            Ok(false) => println!("No credentials stored for {url}."),
             Err(e) => eprintln!("error: {e}"),
         }
         config.connection.username = None;
@@ -160,24 +131,20 @@ fn main() -> std::io::Result<()> {
 
     let auth: Option<(String, String)> = match (&cli_username, &cli_password) {
         (Some(u), Some(p)) => {
-            let saved = save_keyring_credentials(&url, u, p);
-
-            if !saved {
-                eprintln!("info: keyring save failed; storing credentials in config file");
-                config.connection.url = Some(url.clone());
-                config.connection.username = Some(u.clone());
-                config.connection.password = Some(p.clone());
-            } else {
-                config.connection.url = Some(url.clone());
-                config.connection.username = None;
-                config.connection.password = None;
+            if let Err(e) = credentials::save(&url, u, p) {
+                eprintln!(
+                    "warning: {e}; credentials not saved — you will need to supply them again next session"
+                );
             }
+            config.connection.url = Some(url.clone());
+            config.connection.username = None;
+            config.connection.password = None;
             config.save();
             Some((u.clone(), p.clone()))
         }
         _ => {
             // First try to load from the keyring
-            load_keyring_credentials(&url).or_else(|| {
+            credentials::load(&url).or_else(|| {
                 // If keyring is empty, check if we have them in the config file
                 if let (Some(u), Some(p)) =
                     (&config.connection.username, &config.connection.password)
