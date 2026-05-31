@@ -64,9 +64,7 @@ pub fn delete(url: &str) -> Result<bool, String> {
         };
         let _ = tx.send(result);
     });
-    rx.recv_timeout(Duration::from_secs(2))
-        .map_err(|_| "keyring timed out".to_string())
-        .and_then(|r| r)
+    rx.recv_timeout(Duration::from_secs(2)).unwrap_or(Ok(false))
 }
 
 #[cfg(test)]

@@ -1321,12 +1321,11 @@ impl App {
             }
 
             if last_tick.elapsed() >= tick_rate {
-                if self.help.is_none() {
-                    match self.view {
-                        View::TorrentList => self.refresh_torrents(),
-                        View::Files | View::Details => self.refresh_detail(),
-                        #[cfg(feature = "rsync")]
-                        View::Rsync => self.refresh_rsync(),
+                if self.help.is_none() && !matches!(self.modal, Some(Modal::Auth { .. })) {
+                    self.trigger_refresh();
+                    #[cfg(feature = "rsync")]
+                    if self.view == View::Rsync {
+                        self.refresh_rsync();
                     }
                 }
                 self.tick_autoclear();
