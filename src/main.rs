@@ -106,6 +106,11 @@ fn main() -> std::io::Result<()> {
         "http://localhost:9091/transmission/rpc".to_string()
     };
 
+    if !args.url.is_empty() && config.connection.url.as_deref() != Some(&url) {
+        config.connection.url = Some(url.clone());
+        config.save();
+    }
+
     if args.clear_auth {
         match credentials::delete(&url) {
             Ok(true) => println!("Credentials for {url} removed."),
