@@ -3347,4 +3347,152 @@ mod tests {
         assert!(app.last_error.is_none());
         assert!(app.error_since.is_none());
     }
+
+    fn torrent_in_list(app: &mut App) {
+        app.torrents = vec![Torrent {
+            id: 1,
+            ..Default::default()
+        }];
+        app.rebuild_filter();
+    }
+
+    #[test]
+    fn test_handle_torrent_list_key_enter_sets_error_on_dummy() {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        torrent_in_list(&mut app);
+        app.handle_torrent_list_key(make_key(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(app.last_error.is_some());
+        assert!(app.error_since.is_some());
+    }
+
+    #[test]
+    fn test_handle_torrent_list_key_details_sets_error_on_dummy() {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        torrent_in_list(&mut app);
+        app.handle_torrent_list_key(make_key(KeyCode::Tab, KeyModifiers::NONE));
+        assert!(app.last_error.is_some());
+        assert!(app.error_since.is_some());
+    }
+
+    #[test]
+    fn test_handle_torrent_list_key_pause_stopped_sets_error_on_dummy() {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.torrents = vec![Torrent {
+            id: 1,
+            status: 0, // stopped
+            ..Default::default()
+        }];
+        app.rebuild_filter();
+        app.handle_torrent_list_key(make_key(KeyCode::Char('p'), KeyModifiers::NONE));
+        assert!(app.last_error.is_some());
+        assert!(app.error_since.is_some());
+    }
+
+    #[test]
+    fn test_handle_torrent_list_key_pause_running_sets_error_on_dummy() {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.torrents = vec![Torrent {
+            id: 1,
+            status: 4, // seeding
+            ..Default::default()
+        }];
+        app.rebuild_filter();
+        app.handle_torrent_list_key(make_key(KeyCode::Char('p'), KeyModifiers::NONE));
+        assert!(app.last_error.is_some());
+        assert!(app.error_since.is_some());
+    }
+
+    #[test]
+    fn test_handle_torrent_list_key_reannounce_sets_error_on_dummy() {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        torrent_in_list(&mut app);
+        app.handle_torrent_list_key(make_key(KeyCode::Char('t'), KeyModifiers::NONE));
+        assert!(app.last_error.is_some());
+        assert!(app.error_since.is_some());
+    }
+
+    #[test]
+    fn test_handle_torrent_list_key_verify_sets_error_on_dummy() {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        torrent_in_list(&mut app);
+        app.handle_torrent_list_key(make_key(KeyCode::Char('v'), KeyModifiers::NONE));
+        assert!(app.last_error.is_some());
+        assert!(app.error_since.is_some());
+    }
+
+    #[test]
+    fn test_handle_label_input_sets_error_on_dummy() {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        torrent_in_list(&mut app);
+        app.label_input = "tag".into();
+        app.handle_label_input();
+        assert!(app.last_error.is_some());
+        assert!(app.error_since.is_some());
+    }
+
+    #[test]
+    fn test_handle_details_key_reannounce_sets_error_on_dummy() {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.detail_torrent = Some(Torrent {
+            id: 1,
+            ..Default::default()
+        });
+        app.view = View::Details;
+        app.handle_details_key(make_key(KeyCode::Char('t'), KeyModifiers::NONE));
+        assert!(app.last_error.is_some());
+        assert!(app.error_since.is_some());
+    }
+
+    #[test]
+    fn test_adjust_file_priority_sets_error_on_dummy() {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.detail_torrent = Some(Torrent {
+            id: 1,
+            file_stats: vec![FileStats {
+                wanted: true,
+                priority: 0,
+                bytes_completed: 0,
+            }],
+            ..Default::default()
+        });
+        app.view = View::Files;
+        app.handle_files_key(make_key(KeyCode::Char('+'), KeyModifiers::NONE));
+        assert!(app.last_error.is_some());
+        assert!(app.error_since.is_some());
+    }
 }
