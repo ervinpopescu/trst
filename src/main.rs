@@ -94,7 +94,52 @@ where
     args
 }
 
+/// Selects the keyring backend for this process.
+///
+/// On Linux, probes the Secret Service via a background thread with a 2-second
+/// timeout. Switches the process-wide builder to the kernel persistent keyring
+/// (keyutils_persistent) when Secret Service is unavailable OR locked — a locked
+/// keyring silently accepts writes but rejects reads, so we treat it the same as
+/// absent. "Unavailable" means anything other than Ok or NoEntry from the probe.
+/// Safe to call multiple times — only the first call does work. No-op on other platforms.
+#[cfg(target_os = "linux")]
+fn init_keyring_backend() {
+    static DONE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    DONE.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            // Write a probe credential then read it back. A locked keyring silently
+            // accepts writes but rejects reads — NoEntry on a missing entry is not
+            // enough to detect that state.
+            let is_unavailable = match keyring::Entry::new("trst-probe", "probe") {
+                Err(_) => true,
+                Ok(entry) => match entry.set_password("ok") {
+                    Err(_) => true,
+                    Ok(_) => {
+                        let readable = matches!(entry.get_password(), Ok(s) if s == "ok");
+                        let _ = entry.delete_credential();
+                        !readable
+                    }
+                },
+            };
+            let _ = tx.send(is_unavailable);
+        });
+        let use_fallback = matches!(
+            rx.recv_timeout(std::time::Duration::from_secs(2)),
+            Ok(true) | Err(_)
+        );
+        if use_fallback {
+            keyring::set_default_credential_builder(
+                keyring::keyutils_persistent::default_credential_builder(),
+            );
+        }
+    });
+}
+
+#[cfg(not(target_os = "linux"))]
+fn init_keyring_backend() {}
 fn main() -> std::io::Result<()> {
+    init_keyring_backend();
     let mut config = config::Config::load();
     let args = parse_args();
 
@@ -133,14 +178,14 @@ fn main() -> std::io::Result<()> {
 
     let auth: Option<(String, String)> = match (&cli_username, &cli_password) {
         (Some(u), Some(p)) => {
-            if let Err(e) = credentials::save(&url, u, p) {
-                eprintln!(
-                    "warning: {e}; credentials not saved — you will need to supply them again next session"
-                );
-            }
             config.connection.url = Some(url.clone());
-            config.connection.username = None;
-            config.connection.password = None;
+            if credentials::save(&url, u, p).is_err() {
+                config.connection.username = Some(u.clone());
+                config.connection.password = Some(p.clone());
+            } else {
+                config.connection.username = None;
+                config.connection.password = None;
+            }
             config.save();
             Some((u.clone(), p.clone()))
         }
@@ -266,5 +311,18 @@ mod tests {
         let a = parse_args_from(args(&["myserver:9092", "--clear-auth"]));
         assert!(a.clear_auth);
         assert_eq!(a.url, "http://myserver:9092/transmission/rpc");
+    }
+
+    #[test]
+    fn test_init_keyring_backend_makes_entry_usable() {
+        // After backend initialisation, Entry::new must succeed on this platform.
+        // This exercises the fallback path on CI/systems without a secret-service daemon.
+        init_keyring_backend();
+        let entry = keyring::Entry::new("trst", "http://test-init-backend");
+        assert!(
+            entry.is_ok(),
+            "Entry::new failed after init_keyring_backend: {:?}",
+            entry.err()
+        );
     }
 }

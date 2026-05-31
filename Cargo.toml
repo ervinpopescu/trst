@@ -14,7 +14,7 @@ toml = "1.1"
 dirs = "6"
 unicode-width = "0.2"
 base64 = "0.22.1"
-keyring = { version = "3", features = ["sync-secret-service", "apple-native", "windows-native"] }
+keyring = { version = "3", features = ["sync-secret-service", "linux-native-sync-persistent", "apple-native", "windows-native"] }
 
 [features]
 rsync = []
