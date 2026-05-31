@@ -40,9 +40,6 @@ impl TransmissionClient {
         let encoded =
             base64::engine::general_purpose::STANDARD.encode(format!("{username}:{password}"));
         *self.auth_header.lock().unwrap() = Some(format!("Basic {encoded}"));
-        if let Ok(entry) = keyring::Entry::new("trst", &self.url) {
-            let _ = entry.set_password(&format!("{username}\n{password}"));
-        }
     }
 
     fn rpc(&self, method: &str, args: Option<Value>) -> Result<RpcResponse, String> {
