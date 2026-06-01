@@ -106,10 +106,7 @@ fn main() -> std::io::Result<()> {
         "http://localhost:9091/transmission/rpc".to_string()
     };
 
-    if !args.url.is_empty() && config.connection.url.as_deref() != Some(&url) {
-        config.connection.url = Some(url.clone());
-        config.save();
-    }
+    let pending_url = (!args.url.is_empty()).then(|| url.clone());
 
     if args.clear_auth {
         match credentials::delete(&url) {
@@ -177,7 +174,7 @@ fn main() -> std::io::Result<()> {
         auth.as_ref().map(|(u, p)| (u.as_str(), p.as_str())),
         config.connection.timeout,
     );
-    let app = app::App::new(client, config);
+    let app = app::App::new(client, config).with_pending_url_save(pending_url);
 
     let terminal = ratatui::init();
     let prev_hook = std::panic::take_hook();

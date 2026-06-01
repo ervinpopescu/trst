@@ -166,6 +166,9 @@ pub struct App {
     refresh_tx: mpsc::SyncSender<RefreshMsg>,
     refresh_rx: mpsc::Receiver<RefreshMsg>,
     refresh_in_flight: bool,
+
+    // written to config on first successful connection; None once saved or not needed
+    pending_url_save: Option<String>,
 }
 
 impl App {
@@ -203,7 +206,13 @@ impl App {
             refresh_tx,
             refresh_rx,
             refresh_in_flight: false,
+            pending_url_save: None,
         }
+    }
+
+    pub fn with_pending_url_save(mut self, url: Option<String>) -> Self {
+        self.pending_url_save = url;
+        self
     }
 
     pub fn filtered_torrents(&self) -> Vec<&Torrent> {
@@ -431,6 +440,11 @@ impl App {
                         self.clamp_cursor();
                         self.last_error = None;
                         self.error_since = None;
+                        if let Some(url) = self.pending_url_save.take() {
+                            let mut cfg = crate::config::Config::load();
+                            cfg.connection.url = Some(url);
+                            cfg.save();
+                        }
                     }
                     Err(e) => self.set_error(e),
                 },
@@ -2982,6 +2996,44 @@ mod tests {
         assert_eq!(app.stats.as_ref().unwrap().torrent_count, 5);
         assert_eq!(app.free.as_ref().unwrap().size_bytes, 999);
         assert_eq!(app.default_download_dir.as_deref(), Some("/downloads"));
+    }
+
+    #[test]
+    fn test_pending_url_save_consumed_on_first_success() {
+        let mut app =
+            make_app().with_pending_url_save(Some("http://myserver/transmission/rpc".into()));
+
+        app.refresh_tx
+            .send(RefreshMsg::Torrents(Ok(vec![])))
+            .unwrap();
+        app.drain_results();
+
+        assert!(
+            app.pending_url_save.is_none(),
+            "pending_url_save must be cleared after first success"
+        );
+
+        // Second success must not panic (nothing left to save).
+        app.refresh_tx
+            .send(RefreshMsg::Torrents(Ok(vec![])))
+            .unwrap();
+        app.drain_results();
+    }
+
+    #[test]
+    fn test_pending_url_save_not_triggered_on_error() {
+        let mut app =
+            make_app().with_pending_url_save(Some("http://myserver/transmission/rpc".into()));
+
+        app.refresh_tx
+            .send(RefreshMsg::Torrents(Err("refused".into())))
+            .unwrap();
+        app.drain_results();
+
+        assert!(
+            app.pending_url_save.is_some(),
+            "pending_url_save must not be consumed on a failed refresh"
+        );
     }
 
     #[test]
