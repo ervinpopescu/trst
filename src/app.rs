@@ -320,6 +320,17 @@ impl App {
         }
     }
 
+    fn handle_tick(&mut self) {
+        if self.help.is_none() && !matches!(self.modal, Some(Modal::Auth { .. })) {
+            self.trigger_refresh();
+            #[cfg(feature = "rsync")]
+            if self.view == View::Rsync {
+                self.refresh_rsync();
+            }
+        }
+        self.tick_autoclear();
+    }
+
     fn set_error(&mut self, e: impl Into<String>) {
         let e = e.into();
         if e == "HTTP 401 Unauthorized" && !matches!(self.modal, Some(Modal::Auth { .. })) {
@@ -974,13 +985,15 @@ impl App {
                 };
                 self.client.set_auth(&username, &password);
                 let url = self.client.url.clone();
+                let cfg_path = crate::config::config_path();
                 std::thread::spawn(move || {
-                    if credentials::save(&url, &username, &password).is_err() {
-                        let mut cfg = crate::config::Config::load();
-                        cfg.connection.username = Some(username);
-                        cfg.connection.password = Some(password);
-                        cfg.save();
-                    }
+                    persist_credentials_impl(
+                        &url,
+                        &username,
+                        &password,
+                        &cfg_path,
+                        credentials::save,
+                    );
                 });
                 self.refresh_torrents();
             }
@@ -1321,19 +1334,29 @@ impl App {
             }
 
             if last_tick.elapsed() >= tick_rate {
-                if self.help.is_none() && !matches!(self.modal, Some(Modal::Auth { .. })) {
-                    self.trigger_refresh();
-                    #[cfg(feature = "rsync")]
-                    if self.view == View::Rsync {
-                        self.refresh_rsync();
-                    }
-                }
-                self.tick_autoclear();
+                self.handle_tick();
                 last_tick = Instant::now();
             }
         }
 
         Ok(())
+    }
+}
+
+fn persist_credentials_impl<F>(
+    url: &str,
+    username: &str,
+    password: &str,
+    cfg_path: &std::path::PathBuf,
+    save_fn: F,
+) where
+    F: FnOnce(&str, &str, &str) -> Result<(), String>,
+{
+    if save_fn(url, username, password).is_err() {
+        let mut cfg = crate::config::Config::load_from(cfg_path);
+        cfg.connection.username = Some(username.to_string());
+        cfg.connection.password = Some(password.to_string());
+        cfg.save_to(cfg_path);
     }
 }
 
@@ -3693,5 +3716,82 @@ mod tests {
         app.handle_files_key(make_key(KeyCode::Char('+'), KeyModifiers::NONE));
         assert!(app.last_error.is_some());
         assert!(app.error_since.is_some());
+    }
+
+    #[test]
+    fn test_handle_auth_enter_noop_when_no_modal() {
+        let mut app = make_app();
+        app.handle_auth_input(make_key(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(app.modal.is_none());
+    }
+
+    #[test]
+    fn test_persist_credentials_impl_config_fallback_on_save_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg_path = tmp.path().join("config.toml");
+        persist_credentials_impl(
+            "http://test.invalid/rpc",
+            "alice",
+            "secret",
+            &cfg_path,
+            |_, _, _| Err("simulated keyring failure".into()),
+        );
+        let cfg = crate::config::Config::load_from(&cfg_path);
+        assert_eq!(cfg.connection.username.as_deref(), Some("alice"));
+        assert_eq!(cfg.connection.password.as_deref(), Some("secret"));
+    }
+
+    #[test]
+    fn test_persist_credentials_impl_no_config_write_on_save_ok() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg_path = tmp.path().join("config.toml");
+        persist_credentials_impl(
+            "http://test.invalid/rpc",
+            "bob",
+            "hunter2",
+            &cfg_path,
+            |_, _, _| Ok(()),
+        );
+        assert!(
+            !cfg_path.exists(),
+            "config must not be created when keyring save succeeds"
+        );
+    }
+
+    #[test]
+    fn test_handle_tick_triggers_refresh_without_modal() {
+        let mut app = make_app();
+        assert!(!app.refresh_in_flight);
+        app.handle_tick();
+        assert!(
+            app.refresh_in_flight,
+            "handle_tick must trigger a refresh when idle"
+        );
+    }
+
+    #[test]
+    fn test_handle_tick_skips_refresh_during_auth_modal() {
+        let mut app = make_app();
+        app.modal = Some(Modal::Auth {
+            username: String::new(),
+            password: String::new(),
+            focused: AuthField::Username,
+        });
+        app.handle_tick();
+        assert!(
+            !app.refresh_in_flight,
+            "handle_tick must not refresh while auth modal is open"
+        );
+    }
+
+    #[test]
+    fn test_handle_tick_skips_refresh_with_help_open() {
+        let mut app = make_app();
+        app.help = Some(0);
+        app.handle_tick();
+        assert!(
+            !app.refresh_in_flight,
+            "handle_tick must not refresh while help is open"
+        );
     }
 }
