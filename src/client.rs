@@ -161,6 +161,22 @@ impl TransmissionClient {
         Ok(())
     }
 
+    /// Add a torrent from raw `.torrent` file bytes by base64-encoding them as `metainfo`.
+    ///
+    /// Use this instead of `add` when the `.torrent` file lives on the client side, since
+    /// `filename` is resolved by the daemon and the client's local path may not exist there.
+    pub fn add_metainfo(&self, content: &[u8], download_dir: Option<&str>) -> Result<(), String> {
+        let b64 = base64::engine::general_purpose::STANDARD.encode(content);
+        let mut args = json!({ "metainfo": b64 });
+        if let Some(dir) = download_dir
+            && let Some(obj) = args.as_object_mut()
+        {
+            obj.insert("download-dir".to_string(), json!(dir));
+        }
+        self.rpc("torrent-add", Some(args))?;
+        Ok(())
+    }
+
     pub fn set_file_priorities(
         &self,
         torrent_id: i64,

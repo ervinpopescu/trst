@@ -862,7 +862,18 @@ impl App {
                     } else {
                         Some(location.as_str())
                     };
-                    if let Err(e) = self.client.add(&url, dir) {
+                    // If the input is a local .torrent file, send its bytes as base64 metainfo
+                    // so the RPC works against both local and remote daemons.
+                    let file_bytes = if url.ends_with(".torrent") {
+                        std::fs::read(&url).ok()
+                    } else {
+                        None
+                    };
+                    if let Some(bytes) = file_bytes {
+                        if let Err(e) = self.client.add_metainfo(&bytes, dir) {
+                            self.set_error(e);
+                        }
+                    } else if let Err(e) = self.client.add(&url, dir) {
                         self.set_error(e);
                     }
                     self.modal = None;
@@ -913,6 +924,11 @@ impl App {
                 _ => {}
             },
             KeyCode::Tab => match self.modal {
+                Some(Modal::AddUrl(ref mut s)) => {
+                    if let Some(completed) = util::autocomplete_torrent_path(s) {
+                        *s = completed;
+                    }
+                }
                 Some(Modal::AddLocation {
                     ref mut location, ..
                 })
