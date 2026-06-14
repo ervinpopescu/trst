@@ -45,7 +45,21 @@ pub fn draw(f: &mut Frame, app: &App) {
 
     match &app.modal {
         Some(Modal::Confirm(c)) => draw_confirm(f, *c, f.area()),
-        Some(Modal::AddUrl(s)) => draw_input(f, "Add torrent (magnet/URL):", s, f.area(), None),
+        Some(Modal::AddUrl(s)) => {
+            let suggestions = if s.starts_with('/') || s.starts_with("./") || s.starts_with("~/")
+            {
+                Some(util::get_torrent_file_suggestions(s))
+            } else {
+                None
+            };
+            draw_input(
+                f,
+                "Add torrent (magnet/URL/file):",
+                s,
+                f.area(),
+                suggestions,
+            )
+        }
         Some(Modal::AddLocation { location, .. }) => {
             let suggestions = util::get_path_suggestions(location);
             draw_input(

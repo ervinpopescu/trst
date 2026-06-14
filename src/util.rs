@@ -56,6 +56,106 @@ pub fn percent(ratio: f64) -> String {
     format!("{:.1}%", ratio * 100.0)
 }
 
+/// Returns a list of directories and `.torrent` files matching the current input prefix.
+///
+/// Used by the add-torrent modal to provide completion for local `.torrent` file paths.
+pub fn get_torrent_file_suggestions(input: &str) -> Vec<String> {
+    if input.is_empty() {
+        return vec![];
+    }
+
+    let path = std::path::Path::new(input);
+    let (dir, file_prefix) = if input.ends_with('/') {
+        (path, "")
+    } else {
+        (
+            path.parent().unwrap_or_else(|| std::path::Path::new(".")),
+            path.file_name()
+                .unwrap_or_default()
+                .to_str()
+                .unwrap_or_default(),
+        )
+    };
+
+    let dir_str = if dir.as_os_str().is_empty() {
+        "."
+    } else {
+        dir.to_str().unwrap_or(".")
+    };
+
+    let mut matches = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir_str) {
+        for entry in entries.flatten() {
+            if let Ok(name) = entry.file_name().into_string()
+                && name.starts_with(file_prefix)
+                && name != file_prefix
+                && let Ok(file_type) = entry.file_type()
+            {
+                if file_type.is_dir() || file_type.is_symlink() {
+                    matches.push(name);
+                } else if file_type.is_file() && name.ends_with(".torrent") {
+                    matches.push(name);
+                }
+            }
+        }
+    }
+    matches.sort();
+    matches
+}
+
+/// Tab-completes a partially typed path, including `.torrent` files as completion targets.
+///
+/// Like `autocomplete_path` but does not restrict to directories — `.torrent` files are also
+/// valid completions and do not receive a trailing slash.
+pub fn autocomplete_torrent_path(input: &str) -> Option<String> {
+    if input.is_empty() {
+        return None;
+    }
+
+    let path = std::path::Path::new(input);
+    let (dir, file_prefix) = if input.ends_with('/') {
+        (path, "")
+    } else {
+        (
+            path.parent().unwrap_or_else(|| std::path::Path::new(".")),
+            path.file_name()
+                .unwrap_or_default()
+                .to_str()
+                .unwrap_or_default(),
+        )
+    };
+
+    let matches = get_torrent_file_suggestions(input);
+
+    if matches.len() == 1 {
+        let completed_path = dir.join(&matches[0]);
+        let mut completed = completed_path.to_string_lossy().to_string();
+        // Append trailing slash for directories so the user can keep typing the next component.
+        if completed_path.is_dir() {
+            completed.push('/');
+        }
+        return Some(completed);
+    } else if matches.len() > 1 {
+        let mut common_prefix = matches[0].clone();
+        for m in &matches[1..] {
+            let mut new_prefix = String::new();
+            for (c1, c2) in common_prefix.chars().zip(m.chars()) {
+                if c1 == c2 {
+                    new_prefix.push(c1);
+                } else {
+                    break;
+                }
+            }
+            common_prefix = new_prefix;
+        }
+        if common_prefix.len() > file_prefix.len() {
+            return Some(dir.join(common_prefix).to_string_lossy().to_string());
+        }
+    }
+
+    None
+}
+
 /// Returns a list of directory names that match the current input prefix.
 pub fn get_path_suggestions(input: &str) -> Vec<String> {
     if input.is_empty() {

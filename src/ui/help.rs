@@ -30,7 +30,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         (format_bind(&k.pause), "Pause / resume"),
         (format_bind(&k.remove), "Remove torrent"),
         (format_bind(&k.delete), "Remove + delete files"),
-        (format_bind(&k.add), "Add torrent (magnet/URL + location)"),
+        (format_bind(&k.add), "Add torrent (magnet/URL/file + location)"),
         (format_bind(&k.change_location), "Change download location"),
         (format_bind(&k.reannounce), "Reannounce"),
         (format_bind(&k.verify), "Verify"),
