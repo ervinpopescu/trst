@@ -90,12 +90,11 @@ pub fn get_torrent_file_suggestions(input: &str) -> Vec<String> {
                 && name.starts_with(file_prefix)
                 && name != file_prefix
                 && let Ok(file_type) = entry.file_type()
+                && (file_type.is_dir()
+                    || file_type.is_symlink()
+                    || (file_type.is_file() && name.ends_with(".torrent")))
             {
-                if file_type.is_dir() || file_type.is_symlink() {
-                    matches.push(name);
-                } else if file_type.is_file() && name.ends_with(".torrent") {
-                    matches.push(name);
-                }
+                matches.push(name);
             }
         }
     }
