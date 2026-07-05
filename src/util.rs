@@ -390,4 +390,155 @@ mod tests {
         let results = get_path_suggestions(&input);
         assert!(results.contains(&"sub".to_string()));
     }
+
+    // -------------------------------------------------------------------------
+    // get_torrent_file_suggestions
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_get_torrent_file_suggestions_empty_input() {
+        let result = get_torrent_file_suggestions("");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_get_torrent_file_suggestions_includes_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().to_str().unwrap();
+        std::fs::create_dir(dir.path().join("downloads")).unwrap();
+        std::fs::File::create(dir.path().join("plain.txt")).unwrap();
+
+        let input = format!("{}/", base);
+        let results = get_torrent_file_suggestions(&input);
+        // Directories are always included.
+        assert!(results.contains(&"downloads".to_string()), "dir included");
+        // Plain files (non-.torrent) are excluded.
+        assert!(
+            !results.contains(&"plain.txt".to_string()),
+            "non-torrent file excluded"
+        );
+    }
+
+    #[test]
+    fn test_get_torrent_file_suggestions_includes_torrent_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().to_str().unwrap();
+        std::fs::File::create(dir.path().join("ubuntu.torrent")).unwrap();
+        std::fs::File::create(dir.path().join("readme.txt")).unwrap();
+
+        let input = format!("{}/", base);
+        let results = get_torrent_file_suggestions(&input);
+        // .torrent files are included.
+        assert!(
+            results.contains(&"ubuntu.torrent".to_string()),
+            ".torrent included"
+        );
+        // Non-.torrent files are excluded.
+        assert!(
+            !results.contains(&"readme.txt".to_string()),
+            "non-torrent excluded"
+        );
+    }
+
+    #[test]
+    fn test_get_torrent_file_suggestions_prefix_filter() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().to_str().unwrap();
+        std::fs::File::create(dir.path().join("arch.torrent")).unwrap();
+        std::fs::File::create(dir.path().join("ubuntu.torrent")).unwrap();
+
+        // Prefix "arch" should only return "arch.torrent".
+        let input = format!("{}/arch", base);
+        let results = get_torrent_file_suggestions(&input);
+        assert_eq!(results, vec!["arch.torrent".to_string()]);
+
+        // Prefix "xyz" should return nothing.
+        let input2 = format!("{}/xyz", base);
+        assert!(get_torrent_file_suggestions(&input2).is_empty());
+    }
+
+    #[test]
+    fn test_get_torrent_file_suggestions_trailing_slash() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().to_str().unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        std::fs::File::create(dir.path().join("test.torrent")).unwrap();
+
+        let input = format!("{}/", base);
+        let results = get_torrent_file_suggestions(&input);
+        assert!(results.contains(&"sub".to_string()));
+        assert!(results.contains(&"test.torrent".to_string()));
+    }
+
+    // -------------------------------------------------------------------------
+    // autocomplete_torrent_path
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_autocomplete_torrent_path_empty() {
+        assert_eq!(autocomplete_torrent_path(""), None);
+    }
+
+    #[test]
+    fn test_autocomplete_torrent_path_no_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().to_str().unwrap();
+        let input = format!("{}/nonexistent", base);
+        assert_eq!(autocomplete_torrent_path(&input), None);
+    }
+
+    #[test]
+    fn test_autocomplete_torrent_path_single_dir_match_adds_slash() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().to_str().unwrap();
+        std::fs::create_dir(dir.path().join("only_dir")).unwrap();
+
+        let input = format!("{}/only", base);
+        let result = autocomplete_torrent_path(&input);
+        assert!(result.is_some(), "should autocomplete");
+        let completed = result.unwrap();
+        assert!(completed.contains("only_dir"), "contains match name");
+        assert!(completed.ends_with('/'), "trailing slash for directory");
+    }
+
+    #[test]
+    fn test_autocomplete_torrent_path_single_torrent_match_no_slash() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().to_str().unwrap();
+        std::fs::File::create(dir.path().join("debian.torrent")).unwrap();
+
+        let input = format!("{}/deb", base);
+        let result = autocomplete_torrent_path(&input);
+        assert!(result.is_some(), "should autocomplete");
+        let completed = result.unwrap();
+        assert!(completed.contains("debian.torrent"), "contains match name");
+        // .torrent files must NOT get a trailing slash.
+        assert!(
+            !completed.ends_with('/'),
+            "no trailing slash for .torrent file"
+        );
+    }
+
+    #[test]
+    fn test_autocomplete_torrent_path_multiple_matches_common_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().to_str().unwrap();
+        std::fs::File::create(dir.path().join("common_a.torrent")).unwrap();
+        std::fs::File::create(dir.path().join("common_b.torrent")).unwrap();
+
+        // Both share the prefix "common_" — autocomplete should extend to "common_".
+        let input = format!("{}/comm", base);
+        let result = autocomplete_torrent_path(&input);
+        assert!(result.is_some(), "common prefix extended");
+        let completed = result.unwrap();
+        assert!(completed.contains("common_"), "extended to common_");
+
+        // At the common-prefix boundary → no further extension → None.
+        let input2 = format!("{}/common_", base);
+        assert_eq!(
+            autocomplete_torrent_path(&input2),
+            None,
+            "no extension at boundary"
+        );
+    }
 }
