@@ -2861,6 +2861,69 @@ mod tests {
     }
 
     #[test]
+    fn test_handle_add_input_tab_autocompletes_torrent_path() {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        // Create a temp dir with a single .torrent file so Tab has a unique completion.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::File::create(dir.path().join("debian.torrent")).unwrap();
+        let prefix = format!("{}/deb", dir.path().to_str().unwrap());
+
+        let mut app = empty_app();
+        app.modal = Some(Modal::AddUrl(prefix));
+        app.handle_add_input(make_key(KeyCode::Tab, KeyModifiers::NONE));
+
+        match &app.modal {
+            Some(Modal::AddUrl(s)) => {
+                assert!(
+                    s.ends_with("debian.torrent"),
+                    "Tab should complete to the .torrent file, got: {s}"
+                );
+            }
+            _ => panic!("expected AddUrl modal after Tab"),
+        }
+    }
+
+    #[test]
+    fn test_handle_add_input_torrent_file_dispatches_add_metainfo() {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        // Create an actual (dummy-content) .torrent file that can be read.
+        let dir = tempfile::tempdir().unwrap();
+        let torrent_path = dir.path().join("test.torrent");
+        std::fs::write(&torrent_path, b"d4:infod4:name4:teste").unwrap();
+        let torrent_url = torrent_path.to_str().unwrap().to_string();
+
+        let mut app = empty_app();
+        // Simulate the state after URL entry: AddLocation with a .torrent URL.
+        app.modal = Some(Modal::AddLocation {
+            url: torrent_url,
+            location: String::new(),
+        });
+        // Enter dispatches the add — the dummy client will fail at the RPC level,
+        // setting last_error and clearing the modal.
+        app.handle_add_input(make_key(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(app.modal.is_none(), "modal cleared after submit");
+        // The dummy client can't reach a real server, so an error is expected.
+        assert!(app.last_error.is_some(), "error set by failing RPC");
+    }
+
+    #[test]
+    fn test_handle_add_input_nonexistent_torrent_falls_through_to_add() {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        // A .torrent path that does not exist on disk — fs::read returns None,
+        // so the code falls through to client.add() which also fails for a dummy client.
+        let mut app = empty_app();
+        app.modal = Some(Modal::AddLocation {
+            url: "/nonexistent/path/that/does/not.torrent".to_string(),
+            location: String::new(),
+        });
+        app.handle_add_input(make_key(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(app.modal.is_none(), "modal cleared");
+        assert!(app.last_error.is_some(), "error set by failing add");
+    }
+
+    #[test]
     fn test_handle_torrent_list_key_select_down_shift() {
         use crossterm::event::{KeyCode, KeyModifiers};
         let mut app = App::new(

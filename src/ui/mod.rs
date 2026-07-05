@@ -436,6 +436,20 @@ mod tests {
     }
 
     #[test]
+    fn test_draw_modal_add_url_with_local_path_shows_suggestions() {
+        // Exercises the `if s.starts_with('/') …` branch in ui/mod.rs that calls
+        // `util::get_torrent_file_suggestions` and passes suggestions to `draw_input`.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::File::create(dir.path().join("ubuntu.torrent")).unwrap();
+        let partial = format!("{}/ubuntu", dir.path().to_str().unwrap());
+
+        let mut app = make_app();
+        app.modal = Some(Modal::AddUrl(partial));
+        let mut term = make_terminal();
+        term.draw(|f| super::draw(f, &app)).unwrap();
+    }
+
+    #[test]
     fn test_draw_modal_filter() {
         let mut app = make_app();
         app.modal = Some(Modal::Filter);
