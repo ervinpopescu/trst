@@ -46,8 +46,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     match &app.modal {
         Some(Modal::Confirm(c)) => draw_confirm(f, *c, f.area()),
         Some(Modal::AddUrl(s)) => {
-            let suggestions = if s.starts_with('/') || s.starts_with("./") || s.starts_with("~/")
-            {
+            let suggestions = if s.starts_with('/') || s.starts_with("./") || s.starts_with("~/") {
                 Some(util::get_torrent_file_suggestions(s))
             } else {
                 None
