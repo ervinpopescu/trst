@@ -541,4 +541,40 @@ mod tests {
             "no extension at boundary"
         );
     }
+
+    // Exercise the `dir.as_os_str().is_empty()` → `"."` branch:  when the input
+    // has no directory component (e.g. a bare filename), `path.parent()` returns
+    // the empty path `""`, so we substitute `"."` (current directory).
+    #[test]
+    fn test_get_torrent_file_suggestions_bare_filename_uses_cwd() {
+        // Using a prefix that almost certainly doesn't match anything in cwd keeps
+        // the test deterministic while still exercising the fallback branch.
+        let results = get_torrent_file_suggestions("zzzz_unlikely_prefix_xyz");
+        // We only care that the function runs without panic and returns a sorted vec.
+        assert!(results.is_sorted());
+    }
+
+    // Exercise the `is_symlink()` arm: create a symlink inside the temp dir and verify
+    // that `get_torrent_file_suggestions` includes it in the results.
+    #[test]
+    fn test_get_torrent_file_suggestions_includes_symlinks() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target_dir");
+        std::fs::create_dir(&target).unwrap();
+        let link = dir.path().join("link_to_dir");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        #[cfg(not(unix))]
+        {
+            // On non-Unix platforms just create a regular dir so the test compiles.
+            std::fs::create_dir(&link).unwrap();
+        }
+
+        let input = format!("{}/link", dir.path().to_str().unwrap());
+        let results = get_torrent_file_suggestions(&input);
+        assert!(
+            results.contains(&"link_to_dir".to_string()),
+            "symlink included in suggestions"
+        );
+    }
 }
