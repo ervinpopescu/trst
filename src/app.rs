@@ -255,10 +255,8 @@ impl App {
             self.torrents
                 .iter()
                 .filter(|t| !t.download_dir.is_empty())
-                .filter_map(|t| {
-                    seen.insert(t.download_dir.clone())
-                        .then(|| t.download_dir.clone())
-                })
+                .filter(|t| seen.insert(t.download_dir.clone()))
+                .map(|t| t.download_dir.clone())
                 .collect()
         };
 
