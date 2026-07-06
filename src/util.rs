@@ -155,6 +155,30 @@ pub fn autocomplete_torrent_path(input: &str) -> Option<String> {
     None
 }
 
+/// Returns the parent directory of `input` with a trailing slash, used as the
+/// cache key and SSH `find` argument for Tab-completion in location modals.
+///
+/// - Input ending with `/` or empty: returned as-is
+/// - Input of the form `/foo`: returns `"/"` (not `"//"`)
+/// - Input of the form `/foo/bar`: returns `"/foo/"`
+pub fn location_parent_dir(input: &str) -> String {
+    if input.ends_with('/') || input.is_empty() {
+        return input.to_string();
+    }
+    std::path::Path::new(input)
+        .parent()
+        .map(|p| {
+            let s = p.to_string_lossy();
+            // Avoid returning "//" for top-level paths like "/foo".
+            if s.is_empty() || s == "/" {
+                "/".to_string()
+            } else {
+                format!("{}/", s)
+            }
+        })
+        .unwrap_or_else(|| "/".to_string())
+}
+
 /// Returns a list of directory names that match the current input prefix.
 pub fn get_path_suggestions(input: &str) -> Vec<String> {
     if input.is_empty() {
@@ -197,10 +221,119 @@ pub fn get_path_suggestions(input: &str) -> Vec<String> {
     matches
 }
 
+/// Lists immediate subdirectories of `dir` on `host` by running `find` over SSH.
+///
+/// Uses `BatchMode=yes` so it never prompts for a password. Returns `Ok(dirs)` on
+/// success or `Err(msg)` when SSH fails (auth denied, host unreachable, timeout, etc.).
+/// Callers should surface the error message so the user knows to configure key auth.
+pub fn list_remote_dirs(host: &str, dir: &str) -> Result<Vec<String>, String> {
+    let escaped = dir.replace('\'', "'\\''");
+    let cmd = format!(
+        "find '{}' -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort",
+        escaped
+    );
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let host = host.to_string();
+    std::thread::spawn(move || {
+        let result = std::process::Command::new("ssh")
+            .args([
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=2",
+                "--", // argv terminator: everything after is positional, not a flag
+                &host,
+                &cmd,
+            ])
+            .output();
+        let _ = tx.send(result);
+    });
+
+    match rx.recv_timeout(std::time::Duration::from_secs(3)) {
+        Ok(Ok(output)) if output.status.success() => Ok(String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(|l| l.trim_end_matches('/').to_string())
+            .filter(|l| !l.is_empty())
+            .collect()),
+        Ok(Ok(output)) => {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            Err(if stderr.is_empty() {
+                format!(
+                    "ssh exited with status {}",
+                    output.status.code().unwrap_or(-1)
+                )
+            } else {
+                stderr
+            })
+        }
+        Ok(Err(e)) => Err(format!("ssh: {e}")),
+        Err(_) => Err("ssh: timed out".to_string()),
+    }
+}
+
+/// Returns known remote directory paths from `known_dirs` that start with `input`.
+///
+/// An exact match is excluded — only entries that extend beyond `input` are returned,
+/// which is what makes them useful as completions.
+pub fn get_remote_dir_suggestions(input: &str, known_dirs: &[String]) -> Vec<String> {
+    known_dirs
+        .iter()
+        .filter(|d| d.starts_with(input) && d.as_str() != input)
+        .cloned()
+        .collect()
+}
+
+/// Tab-completes a partially typed path against a set of known remote directory paths.
+///
+/// Works like `autocomplete_path` but uses `known_dirs` (paths from the remote daemon)
+/// instead of reading the local filesystem.
+pub fn autocomplete_remote_path(input: &str, known_dirs: &[String]) -> Option<String> {
+    if input.is_empty() {
+        return None;
+    }
+
+    let matches: Vec<&str> = known_dirs
+        .iter()
+        .filter(|d| d.starts_with(input) && d.as_str() != input)
+        .map(String::as_str)
+        .collect();
+
+    if matches.len() == 1 {
+        let mut completed = matches[0].to_string();
+        if !completed.ends_with('/') {
+            completed.push('/');
+        }
+        return Some(completed);
+    } else if matches.len() > 1 {
+        let mut common_prefix = matches[0].to_string();
+        for m in &matches[1..] {
+            let new_prefix: String = common_prefix
+                .chars()
+                .zip(m.chars())
+                .take_while(|(a, b)| a == b)
+                .map(|(a, _)| a)
+                .collect();
+            common_prefix = new_prefix;
+        }
+        if common_prefix.len() > input.len() {
+            return Some(common_prefix);
+        }
+    }
+
+    None
+}
+
 /// Attempts to auto-complete a partially typed path by listing the directory contents.
 pub fn autocomplete_path(input: &str) -> Option<String> {
     if input.is_empty() {
         return None;
+    }
+
+    // If the input is itself an existing directory without a trailing slash,
+    // append one so the user can Tab again to list its contents.
+    if !input.ends_with('/') && std::path::Path::new(input).is_dir() {
+        return Some(format!("{}/", input));
     }
 
     let path = std::path::Path::new(input);
@@ -576,5 +709,119 @@ mod tests {
             results.contains(&"link_to_dir".to_string()),
             "symlink included in suggestions"
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // list_remote_dirs
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_list_remote_dirs_ssh_failure_returns_err() {
+        // Install a minimal fake `ssh` script that exits non-zero immediately,
+        // so this test requires no network access.
+        let fake_dir = tempfile::tempdir().unwrap();
+        let fake_ssh = fake_dir.path().join("ssh");
+        std::fs::write(&fake_ssh, "#!/bin/sh\necho 'Permission denied (publickey).' >&2\nexit 255").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&fake_ssh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let original_path = std::env::var("PATH").unwrap_or_default();
+        // Prepend the fake directory so our stub wins over the real ssh.
+        // SAFETY: single-threaded test; no other threads read PATH concurrently.
+        unsafe {
+            std::env::set_var("PATH", format!("{}:{}", fake_dir.path().display(), original_path));
+        }
+
+        let result = list_remote_dirs("myhost", "/");
+
+        // SAFETY: restoring the value we read above.
+        unsafe { std::env::set_var("PATH", original_path) };
+        assert!(result.is_err(), "expected Err when ssh exits with failure");
+    }
+
+    // -------------------------------------------------------------------------
+    // get_remote_dir_suggestions
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_get_remote_dir_suggestions_prefix_match() {
+        let known = vec![
+            "/srv/downloads".to_string(),
+            "/srv/media".to_string(),
+            "/home/user".to_string(),
+        ];
+        let result = get_remote_dir_suggestions("/srv/", &known);
+        assert!(result.contains(&"/srv/downloads".to_string()));
+        assert!(result.contains(&"/srv/media".to_string()));
+        assert!(!result.contains(&"/home/user".to_string()));
+    }
+
+    #[test]
+    fn test_get_remote_dir_suggestions_excludes_exact_match() {
+        let known = vec![
+            "/srv/downloads".to_string(),
+            "/srv/downloads/complete".to_string(),
+        ];
+        let result = get_remote_dir_suggestions("/srv/downloads", &known);
+        assert!(
+            !result.contains(&"/srv/downloads".to_string()),
+            "exact match excluded"
+        );
+        assert!(result.contains(&"/srv/downloads/complete".to_string()));
+    }
+
+    #[test]
+    fn test_get_remote_dir_suggestions_no_match() {
+        let known = vec!["/srv/downloads".to_string()];
+        let result = get_remote_dir_suggestions("/home/", &known);
+        assert!(result.is_empty());
+    }
+
+    // -------------------------------------------------------------------------
+    // autocomplete_remote_path
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_autocomplete_remote_path_empty_input() {
+        let known = vec!["/srv/downloads".to_string()];
+        assert_eq!(autocomplete_remote_path("", &known), None);
+    }
+
+    #[test]
+    fn test_autocomplete_remote_path_single_match_appends_slash() {
+        let known = vec!["/srv/downloads".to_string()];
+        let result = autocomplete_remote_path("/srv/down", &known);
+        assert_eq!(result, Some("/srv/downloads/".to_string()));
+    }
+
+    #[test]
+    fn test_autocomplete_remote_path_already_has_trailing_slash() {
+        let known = vec!["/srv/downloads/".to_string()];
+        let result = autocomplete_remote_path("/srv/down", &known);
+        assert_eq!(result, Some("/srv/downloads/".to_string()));
+    }
+
+    #[test]
+    fn test_autocomplete_remote_path_multiple_matches_extended_prefix() {
+        let known = vec!["/srv/downloads".to_string(), "/srv/downstairs".to_string()];
+        // Both share "/srv/down" which extends beyond the input "/srv/d".
+        let result = autocomplete_remote_path("/srv/d", &known);
+        assert_eq!(result, Some("/srv/down".to_string()));
+    }
+
+    #[test]
+    fn test_autocomplete_remote_path_multiple_no_extension() {
+        let known = vec!["/srv/downloads".to_string(), "/srv/data".to_string()];
+        // "/srv/downloads" and "/srv/data" share only "/srv/d" which equals the input → None.
+        let result = autocomplete_remote_path("/srv/d", &known);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_autocomplete_remote_path_no_match() {
+        let known = vec!["/srv/downloads".to_string()];
+        assert_eq!(autocomplete_remote_path("/home/", &known), None);
     }
 }

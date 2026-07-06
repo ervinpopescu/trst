@@ -286,6 +286,7 @@ pub const TORRENT_LIST_FIELDS: &[&str] = &[
     "sequential_download",
     "trackerStats",
     "labels",
+    "downloadDir",
 ];
 
 pub const TORRENT_DETAIL_FIELDS: &[&str] = &[

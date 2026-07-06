@@ -14,6 +14,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::app::{App, AuthField, Confirm, Modal, View};
 use crate::config::parse_color;
+use crate::protocol::Torrent;
 use crate::util;
 
 pub fn draw(f: &mut Frame, app: &App) {
@@ -60,7 +61,7 @@ pub fn draw(f: &mut Frame, app: &App) {
             )
         }
         Some(Modal::AddLocation { location, .. }) => {
-            let suggestions = util::get_path_suggestions(location);
+            let suggestions = location_suggestions(location, app);
             draw_input(
                 f,
                 "Download location:",
@@ -70,7 +71,7 @@ pub fn draw(f: &mut Frame, app: &App) {
             )
         }
         Some(Modal::ChangeLocation(location)) => {
-            let suggestions = util::get_path_suggestions(location);
+            let suggestions = location_suggestions(location, app);
             draw_input(
                 f,
                 "Change location to:",
@@ -552,6 +553,55 @@ mod tests {
         let mut term = make_terminal();
         term.draw(|f| super::draw(f, &app)).unwrap();
     }
+}
+
+/// Returns location suggestions for the modal dropdown.
+///
+/// Priority order:
+/// 1. SSH-populated directory cache (accurate remote dirs, filled on Tab press)
+/// 2. Download directories already known from existing torrents
+/// 3. Local filesystem via `get_path_suggestions` — correct for localhost daemons,
+///    and preserves the pre-SSH behavior for remote daemons before the first Tab press
+fn location_suggestions(input: &str, app: &App) -> Vec<String> {
+    if let Some((cached_dir, listing)) = &app.location_dir_cache {
+        let input_parent = util::location_parent_dir(input);
+        if *cached_dir == input_parent {
+            let suggestions = util::get_remote_dir_suggestions(input, listing);
+            if !suggestions.is_empty() || listing.iter().any(|d| d.starts_with(input)) {
+                return suggestions;
+            }
+            // SSH was attempted for this directory (cache is present). Don't fall through
+            // to the local filesystem — those paths belong to this machine, not the
+            // remote host. Known torrent download dirs are still valid: the daemon
+            // reported them, so they exist on the remote side.
+            return util::get_remote_dir_suggestions(input, &remote_download_dirs(&app.torrents));
+        }
+    }
+    let known = remote_download_dirs(&app.torrents);
+    let torrent_suggestions = util::get_remote_dir_suggestions(input, &known);
+    if !torrent_suggestions.is_empty() {
+        return torrent_suggestions;
+    }
+    // Local filesystem: prefix bare names with the parent directory so the
+    // dropdown shows full paths, consistent with every other branch.
+    let parent = util::location_parent_dir(input);
+    util::get_path_suggestions(input)
+        .into_iter()
+        .map(|name| format!("{}{}", parent, name))
+        .collect()
+}
+
+/// Collects the unique, sorted download directories known to the remote daemon.
+fn remote_download_dirs(torrents: &[Torrent]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut dirs: Vec<String> = torrents
+        .iter()
+        .filter(|t| !t.download_dir.is_empty())
+        .filter(|t| seen.insert(t.download_dir.clone()))
+        .map(|t| t.download_dir.clone())
+        .collect();
+    dirs.sort();
+    dirs
 }
 
 fn draw_centered_popup(f: &mut Frame, text: &str, area: Rect) {
