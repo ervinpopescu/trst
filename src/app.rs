@@ -168,6 +168,11 @@ pub struct App {
 
     // written to config on first successful connection; None once saved or not needed
     pending_url_save: Option<String>,
+
+    // SSH directory listing cache for the location modal: (listed_dir, subdirs).
+    // Populated on Tab press; avoids redundant SSH round-trips when completing
+    // within the same parent directory.
+    pub location_dir_cache: Option<(String, Vec<String>)>,
 }
 
 impl App {
@@ -206,12 +211,106 @@ impl App {
             refresh_rx,
             refresh_in_flight: false,
             pending_url_save: None,
+            location_dir_cache: None,
         }
     }
 
     pub fn with_pending_url_save(mut self, url: Option<String>) -> Self {
         self.pending_url_save = url;
         self
+    }
+
+    /// Returns the remote hostname for SSH if the connection is not to localhost.
+    fn ssh_host(&self) -> Option<String> {
+        let url = &self.client.url;
+        let after_scheme = url
+            .strip_prefix("http://")
+            .or_else(|| url.strip_prefix("https://"))?;
+        let host_port = after_scheme.split('/').next()?;
+        // IPv6 literals are bracketed: [::1]:9091 — strip brackets before comparing.
+        let host = if host_port.starts_with('[') {
+            host_port.split(']').next()?.trim_start_matches('[')
+        } else {
+            host_port.split(':').next()?.trim()
+        };
+        match host {
+            "" | "localhost" | "127.0.0.1" | "::1" => None,
+            // Reject flag-shaped hostnames to prevent argv flag smuggling in ssh invocations.
+            h if h.starts_with('-') => None,
+            h => Some(h.to_string()),
+        }
+    }
+
+    /// Tab-completes a location input, using SSH for remote daemons and the local
+    /// filesystem for local ones.  Results are cached by parent directory so that
+    /// repeated Tab presses in the same directory don't re-run SSH.
+    ///
+    /// In both cases, known torrent download directories are used as a fallback
+    /// when neither SSH nor the local filesystem produces a completion — this
+    /// ensures Tab is useful even with an empty input or after an SSH failure.
+    fn complete_location(&mut self, input: &str) -> Option<String> {
+        // Pre-collect known torrent dirs for the fallback; used in both branches.
+        let known_dirs: Vec<String> = {
+            let mut seen = std::collections::HashSet::new();
+            self.torrents
+                .iter()
+                .filter(|t| !t.download_dir.is_empty())
+                .filter_map(|t| {
+                    seen.insert(t.download_dir.clone())
+                        .then(|| t.download_dir.clone())
+                })
+                .collect()
+        };
+
+        match self.ssh_host() {
+            Some(host) => {
+                let dir = util::location_parent_dir(input);
+                let listing = if self.location_dir_cache.as_ref().map(|(d, _)| d.as_str())
+                    == Some(dir.as_str())
+                {
+                    self.location_dir_cache
+                        .as_ref()
+                        .map(|(_, v)| v.clone())
+                        .unwrap_or_default()
+                } else {
+                    match util::list_remote_dirs(&host, &dir) {
+                        Ok(dirs) => {
+                            self.location_dir_cache = Some((dir, dirs.clone()));
+                            dirs
+                        }
+                        Err(e) => {
+                            // Cache empty so we don't retry on every Tab press.
+                            self.location_dir_cache = Some((dir, vec![]));
+                            self.last_error = Some(format!("SSH directory listing failed: {e}"));
+                            self.error_since = Some(std::time::Instant::now());
+                            vec![]
+                        }
+                    }
+                };
+                // Fall back to torrent dirs only when SSH returned nothing at all
+                // (e.g. auth failure). If the listing is non-empty but has no
+                // unique prefix, the user simply needs to type more.
+                util::autocomplete_remote_path(input, &listing).or_else(|| {
+                    if listing.is_empty() {
+                        util::autocomplete_remote_path(input, &known_dirs)
+                    } else {
+                        None
+                    }
+                })
+            }
+            None => {
+                // Fall back to torrent dirs only when the filesystem has no
+                // candidates at all — not merely when they share no common prefix.
+                let fs_matches = util::get_path_suggestions(input);
+                util::autocomplete_path(input).or_else(|| {
+                    if fs_matches.is_empty() {
+                        util::autocomplete_remote_path(input, &known_dirs)
+                    } else {
+                        None
+                    }
+                })
+            }
+        }
     }
 
     pub fn filtered_torrents(&self) -> Vec<&Torrent> {
@@ -923,22 +1022,40 @@ impl App {
                 }
                 _ => {}
             },
-            KeyCode::Tab => match self.modal {
-                Some(Modal::AddUrl(ref mut s)) => {
-                    if let Some(completed) = util::autocomplete_torrent_path(s) {
-                        *s = completed;
+            KeyCode::Tab => {
+                // For location modals, extract the current input first so we can call
+                // complete_location (which needs &mut self) without a borrow conflict.
+                let location_completion: Option<String> = if matches!(
+                    self.modal,
+                    Some(Modal::AddLocation { .. }) | Some(Modal::ChangeLocation(_))
+                ) {
+                    let current = match &self.modal {
+                        Some(Modal::AddLocation { location, .. })
+                        | Some(Modal::ChangeLocation(location)) => location.clone(),
+                        _ => unreachable!(),
+                    };
+                    self.complete_location(&current)
+                } else {
+                    None
+                };
+
+                match self.modal {
+                    Some(Modal::AddUrl(ref mut s)) => {
+                        if let Some(completed) = util::autocomplete_torrent_path(s) {
+                            *s = completed;
+                        }
                     }
-                }
-                Some(Modal::AddLocation {
-                    ref mut location, ..
-                })
-                | Some(Modal::ChangeLocation(ref mut location)) => {
-                    if let Some(completed) = util::autocomplete_path(location) {
-                        *location = completed;
+                    Some(Modal::AddLocation {
+                        ref mut location, ..
+                    })
+                    | Some(Modal::ChangeLocation(ref mut location)) => {
+                        if let Some(completed) = location_completion {
+                            *location = completed;
+                        }
                     }
+                    _ => {}
                 }
-                _ => {}
-            },
+            }
             _ => {}
         }
     }
@@ -1383,6 +1500,7 @@ fn is_safe_relative_path(name: &str) -> bool {
             .components()
             .all(|c| matches!(c, Component::Normal(_)))
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -3872,5 +3990,269 @@ mod tests {
             !app.refresh_in_flight,
             "handle_tick must not refresh while help is open"
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // location_parent_dir
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_location_parent_dir_trailing_slash() {
+        assert_eq!(util::location_parent_dir("/foo/bar/"), "/foo/bar/");
+    }
+
+    #[test]
+    fn test_location_parent_dir_empty() {
+        assert_eq!(util::location_parent_dir(""), "");
+    }
+
+    #[test]
+    fn test_location_parent_dir_nested() {
+        assert_eq!(util::location_parent_dir("/foo/bar"), "/foo/");
+    }
+
+    #[test]
+    fn test_location_parent_dir_top_level() {
+        // "/foo" → parent is "/" → returns "/" (not "//")
+        assert_eq!(util::location_parent_dir("/foo"), "/");
+    }
+
+    // -------------------------------------------------------------------------
+    // ssh_host
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_ssh_host_remote_hostname() {
+        let app = App::new(
+            TransmissionClient::new(
+                "http://myserver.example.com:9091/transmission/rpc",
+                None,
+                None,
+            ),
+            Config::default(),
+        );
+        assert_eq!(app.ssh_host(), Some("myserver.example.com".to_string()));
+    }
+
+    #[test]
+    fn test_ssh_host_localhost_returns_none() {
+        for url in &[
+            "http://localhost:9091/transmission/rpc",
+            "http://127.0.0.1:9091/transmission/rpc",
+            "http://[::1]:9091/transmission/rpc",
+        ] {
+            let app = App::new(TransmissionClient::new(url, None, None), Config::default());
+            assert_eq!(app.ssh_host(), None, "expected None for {url}");
+        }
+    }
+
+    #[test]
+    fn test_ssh_host_flag_shaped_rejected() {
+        let app = App::new(
+            TransmissionClient::new("http://-oProxyCommand=evil:9091/rpc", None, None),
+            Config::default(),
+        );
+        assert_eq!(
+            app.ssh_host(),
+            None,
+            "flag-shaped hostname must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_ssh_host_https_scheme() {
+        let app = App::new(
+            TransmissionClient::new("https://remote.host/transmission/rpc", None, None),
+            Config::default(),
+        );
+        assert_eq!(app.ssh_host(), Some("remote.host".to_string()));
+    }
+
+    // -------------------------------------------------------------------------
+    // complete_location
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_tab_completes_change_location_modal() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("completed_dir")).unwrap();
+
+        // Use localhost so complete_location falls back to local filesystem.
+        let mut app = App::new(
+            TransmissionClient::new("http://localhost:9091/rpc", None, None),
+            Config::default(),
+        );
+        let prefix = format!("{}/comp", dir.path().to_str().unwrap());
+        app.modal = Some(Modal::ChangeLocation(prefix));
+
+        app.handle_add_input(KeyEvent {
+            code: KeyCode::Tab,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        });
+
+        match &app.modal {
+            Some(Modal::ChangeLocation(s)) => {
+                assert!(
+                    s.contains("completed_dir"),
+                    "Tab should complete to the directory"
+                );
+            }
+            _ => panic!("expected ChangeLocation modal"),
+        }
+    }
+
+    #[test]
+    fn test_tab_completes_add_location_modal() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("download_dir")).unwrap();
+
+        let mut app = App::new(
+            TransmissionClient::new("http://localhost:9091/rpc", None, None),
+            Config::default(),
+        );
+        let prefix = format!("{}/down", dir.path().to_str().unwrap());
+        app.modal = Some(Modal::AddLocation {
+            url: "magnet:?xt=test".to_string(),
+            location: prefix,
+        });
+
+        app.handle_add_input(KeyEvent {
+            code: KeyCode::Tab,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        });
+
+        match &app.modal {
+            Some(Modal::AddLocation { location, .. }) => {
+                assert!(
+                    location.contains("download_dir"),
+                    "Tab should complete to the directory"
+                );
+            }
+            _ => panic!("expected AddLocation modal"),
+        }
+    }
+
+    #[test]
+    fn test_complete_location_local_uses_filesystem() {
+        // localhost → ssh_host() returns None → falls back to local autocomplete.
+        let mut app = App::new(
+            TransmissionClient::new("http://localhost:9091/rpc", None, None),
+            Config::default(),
+        );
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("only_match")).unwrap();
+        let input = format!("{}/only", dir.path().to_str().unwrap());
+        let result = app.complete_location(&input);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("only_match"));
+    }
+
+    #[test]
+    fn test_complete_location_remote_cache_hit() {
+        // Remote app with a pre-populated cache → returns from cache without SSH.
+        let mut app = App::new(
+            TransmissionClient::new("http://remotehost:9091/rpc", None, None),
+            Config::default(),
+        );
+        app.location_dir_cache = Some((
+            "/srv/".to_string(),
+            vec!["/srv/downloads".to_string(), "/srv/media".to_string()],
+        ));
+        let result = app.complete_location("/srv/d");
+        assert_eq!(result, Some("/srv/downloads/".to_string()));
+    }
+
+    #[test]
+    fn test_complete_location_remote_error_cache_prevents_retry() {
+        // When SSH previously failed, location_dir_cache is set to Some((dir, [])).
+        // A second complete_location call for the same dir must use the cache
+        // (no SSH) and return None (no completions available).
+        let mut app = App::new(
+            TransmissionClient::new("http://remotehost:9091/rpc", None, None),
+            Config::default(),
+        );
+        // Pre-populate the cache as if a prior SSH call already failed.
+        app.location_dir_cache = Some(("/srv/".to_string(), vec![]));
+
+        let result = app.complete_location("/srv/data");
+        // Cache hit: empty listing → no completions, no new SSH call.
+        assert_eq!(result, None);
+        // Cache must remain intact (not overwritten by a retry).
+        assert_eq!(
+            app.location_dir_cache,
+            Some(("/srv/".to_string(), vec![]))
+        );
+    }
+
+    #[test]
+    fn test_complete_location_remote_ssh_error_sets_last_error() {
+        // Install a fake `ssh` that immediately exits non-zero so this test
+        // does not require network access.
+        use std::io::Write;
+        let fake_dir = tempfile::tempdir().unwrap();
+        let fake_ssh = fake_dir.path().join("ssh");
+        {
+            let mut f = std::fs::File::create(&fake_ssh).unwrap();
+            writeln!(f, "#!/bin/sh").unwrap();
+            writeln!(f, "echo 'Permission denied (publickey).' >&2").unwrap();
+            writeln!(f, "exit 255").unwrap();
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&fake_ssh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let original_path = std::env::var("PATH").unwrap_or_default();
+        // SAFETY: single-threaded test; no other threads read PATH concurrently.
+        unsafe {
+            std::env::set_var("PATH", format!("{}:{}", fake_dir.path().display(), original_path));
+        }
+
+        let mut app = App::new(
+            TransmissionClient::new("http://remotehost:9091/rpc", None, None),
+            Config::default(),
+        );
+        let _result = app.complete_location("/srv/");
+
+        // SAFETY: restoring the value we read above.
+        unsafe { std::env::set_var("PATH", original_path) };
+
+        assert!(app.last_error.is_some(), "SSH failure should set last_error");
+        assert!(app.error_since.is_some(), "SSH failure should set error_since");
+        // Cache populated with empty listing so repeated presses don't retry.
+        assert_eq!(app.location_dir_cache, Some(("/srv/".to_string(), vec![])));
+    }
+
+    #[test]
+    fn test_location_parent_dir_relative_no_slash() {
+        // A path with no directory component — parent is "" which is resolved to "/".
+        assert_eq!(util::location_parent_dir("foo"), "/");
+    }
+
+    #[test]
+    fn test_complete_location_remote_cache_miss_then_hit() {
+        // After a cache-miss SSH call populates the cache, a second call with the
+        // same parent dir uses the cache and does not re-invoke SSH.
+        let mut app = App::new(
+            TransmissionClient::new("http://remotehost:9091/rpc", None, None),
+            Config::default(),
+        );
+        app.location_dir_cache = Some((
+            "/data/".to_string(),
+            vec!["/data/archive".to_string(), "/data/active".to_string()],
+        ));
+        // Both completions should come from the cache (same parent "/data/").
+        let r1 = app.complete_location("/data/ar");
+        let r2 = app.complete_location("/data/ac");
+        assert_eq!(r1, Some("/data/archive/".to_string()));
+        assert_eq!(r2, Some("/data/active/".to_string()));
     }
 }
