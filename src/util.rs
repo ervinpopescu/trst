@@ -721,7 +721,11 @@ mod tests {
         // so this test requires no network access.
         let fake_dir = tempfile::tempdir().unwrap();
         let fake_ssh = fake_dir.path().join("ssh");
-        std::fs::write(&fake_ssh, "#!/bin/sh\necho 'Permission denied (publickey).' >&2\nexit 255").unwrap();
+        std::fs::write(
+            &fake_ssh,
+            "#!/bin/sh\necho 'Permission denied (publickey).' >&2\nexit 255",
+        )
+        .unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -731,7 +735,10 @@ mod tests {
         // Prepend the fake directory so our stub wins over the real ssh.
         // SAFETY: single-threaded test; no other threads read PATH concurrently.
         unsafe {
-            std::env::set_var("PATH", format!("{}:{}", fake_dir.path().display(), original_path));
+            std::env::set_var(
+                "PATH",
+                format!("{}:{}", fake_dir.path().display(), original_path),
+            );
         }
 
         let result = list_remote_dirs("myhost", "/");
