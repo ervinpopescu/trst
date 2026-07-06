@@ -1501,7 +1501,6 @@ fn is_safe_relative_path(name: &str) -> bool {
             .all(|c| matches!(c, Component::Normal(_)))
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4186,10 +4185,7 @@ mod tests {
         // Cache hit: empty listing → no completions, no new SSH call.
         assert_eq!(result, None);
         // Cache must remain intact (not overwritten by a retry).
-        assert_eq!(
-            app.location_dir_cache,
-            Some(("/srv/".to_string(), vec![]))
-        );
+        assert_eq!(app.location_dir_cache, Some(("/srv/".to_string(), vec![])));
     }
 
     #[test]
@@ -4213,7 +4209,10 @@ mod tests {
         let original_path = std::env::var("PATH").unwrap_or_default();
         // SAFETY: single-threaded test; no other threads read PATH concurrently.
         unsafe {
-            std::env::set_var("PATH", format!("{}:{}", fake_dir.path().display(), original_path));
+            std::env::set_var(
+                "PATH",
+                format!("{}:{}", fake_dir.path().display(), original_path),
+            );
         }
 
         let mut app = App::new(
@@ -4225,8 +4224,14 @@ mod tests {
         // SAFETY: restoring the value we read above.
         unsafe { std::env::set_var("PATH", original_path) };
 
-        assert!(app.last_error.is_some(), "SSH failure should set last_error");
-        assert!(app.error_since.is_some(), "SSH failure should set error_since");
+        assert!(
+            app.last_error.is_some(),
+            "SSH failure should set last_error"
+        );
+        assert!(
+            app.error_since.is_some(),
+            "SSH failure should set error_since"
+        );
         // Cache populated with empty listing so repeated presses don't retry.
         assert_eq!(app.location_dir_cache, Some(("/srv/".to_string(), vec![])));
     }
