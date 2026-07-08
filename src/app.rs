@@ -221,7 +221,7 @@ impl App {
     }
 
     /// Returns the remote hostname for SSH if the connection is not to localhost.
-    fn ssh_host(&self) -> Option<String> {
+    pub fn ssh_host(&self) -> Option<String> {
         let url = &self.client.url;
         let after_scheme = url
             .strip_prefix("http://")

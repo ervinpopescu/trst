@@ -557,12 +557,29 @@ mod tests {
 
 /// Returns location suggestions for the modal dropdown.
 ///
-/// Priority order:
+/// Priority order for **localhost** (no SSH host):
+/// 1. Local filesystem via `get_path_suggestions`
+/// 2. Download directories already known from existing torrents
+///
+/// Priority order for **remote hosts**:
 /// 1. SSH-populated directory cache (accurate remote dirs, filled on Tab press)
 /// 2. Download directories already known from existing torrents
-/// 3. Local filesystem via `get_path_suggestions` — correct for localhost daemons,
-///    and preserves the pre-SSH behavior for remote daemons before the first Tab press
+/// 3. Local filesystem — fallback before the first Tab press populates the cache
 fn location_suggestions(input: &str, app: &App) -> Vec<String> {
+    // For localhost the remote host is None and SSH is never used, so local
+    // filesystem suggestions are always the most relevant source.
+    if app.ssh_host().is_none() {
+        let parent = util::location_parent_dir(input);
+        let fs_suggestions: Vec<String> = util::get_path_suggestions(input)
+            .into_iter()
+            .map(|name| format!("{}{}", parent, name))
+            .collect();
+        if !fs_suggestions.is_empty() {
+            return fs_suggestions;
+        }
+        return util::get_remote_dir_suggestions(input, &remote_download_dirs(&app.torrents));
+    }
+
     if let Some((cached_dir, listing)) = &app.location_dir_cache {
         let input_parent = util::location_parent_dir(input);
         if *cached_dir == input_parent {
