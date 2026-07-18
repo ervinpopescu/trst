@@ -63,7 +63,11 @@ trst --url http://192.168.1.100:9091/transmission/rpc --username admin --passwor
 To use the script with Transmission:
 1. Ensure `requests` is installed (`pip install requests`).
 2. Set your TMDB API key. You can either:
-   - Add `tmdb_api_key = "your_key_here"` to `~/.config/trst/config.toml`.
+   - Add the following to `~/.config/trst/config.toml`:
+     ```toml
+     [media]
+     tmdb_api_key = "your_key_here"
+     ```
    - Set the `TMDB_API_KEY` environment variable in your Transmission environment.
 3. Copy the script to a permanent location (e.g., `~/.local/bin/organize_media.py`).
 4. Update your Transmission `settings.json`:

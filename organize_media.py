@@ -4,6 +4,7 @@ import re
 import sys
 import shutil
 import requests
+import tomllib
 from pathlib import Path
 
 # --- Configuration ---
@@ -17,18 +18,17 @@ def get_api_key():
     config_path = Path.home() / ".config" / "trst" / "config.toml"
     if config_path.exists():
         try:
-            with open(config_path, "r") as f:
-                content = f.read()
-                # Look for tmdb_api_key = "..."
-                match = re.search(r'tmdb_api_key\s*=\s*"(.*?)"', content)
-                if match:
-                    return match.group(1)
+            with open(config_path, "rb") as f:
+                data = tomllib.load(f)
+                # Look for [media] tmdb_api_key
+                return data.get("media", {}).get("tmdb_api_key")
         except Exception:
             pass
 
     return None
 
 TMDB_API_KEY = get_api_key()
+
 # Target base directory for organized media.
 BASE_MEDIA_DIR = Path("/mnt/hetzner/media")
 MOVIES_DIR = BASE_MEDIA_DIR / "movies"
