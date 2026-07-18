@@ -7,6 +7,7 @@ use std::path::PathBuf;
 #[serde(default)]
 pub struct Config {
     pub connection: ConnectionConfig,
+    pub media: MediaConfig,
     pub theme: ThemeConfig,
     pub keys: KeysConfig,
 }
@@ -18,6 +19,12 @@ pub struct ConnectionConfig {
     pub username: Option<String>,
     pub password: Option<String>,
     pub timeout: Option<u64>,
+}
+
+#[derive(Deserialize, Serialize, Default)]
+#[serde(default)]
+pub struct MediaConfig {
+    pub tmdb_api_key: Option<String>,
 }
 
 impl Config {
