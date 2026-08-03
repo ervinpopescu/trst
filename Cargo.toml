@@ -13,7 +13,7 @@ serde_json = "1"
 toml = "1.1"
 dirs = "6"
 unicode-width = "0.2"
-base64 = "0.22.1"
+base64 = "0.23.0"
 keyring = { version = "3", features = ["sync-secret-service", "linux-native-sync-persistent", "apple-native", "windows-native"] }
 
 [features]
