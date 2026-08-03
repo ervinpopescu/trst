@@ -2,12 +2,12 @@
 use super::*;
 use crate::client::TransmissionClient;
 use crate::config::Config;
-use crate::protocol::{Torrent, SessionStats, FreeSpace, TrackerStats};
-use crossterm::event::{KeyCode, KeyModifiers, KeyEvent};
+use crate::protocol::{FileStats, FreeSpace, SessionStats, Torrent, TorrentFile, TrackerStats};
+use crate::test_support::{ScriptedServer, success};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Instant;
-
 
 fn make_key(
     code: crossterm::event::KeyCode,
@@ -25,21 +25,6 @@ fn make_key(
 fn empty_app() -> App {
     App::new(
         TransmissionClient::new("http://dummy.invalid:9091/transmission/rpc", None, None),
-        Config::default(),
-    )
-}
-
-fn torrent_in_list(app: &mut App) {
-    app.torrents = vec![Torrent {
-        id: 1,
-        ..Default::default()
-    }];
-    app.rebuild_filter();
-}
-
-fn make_app() -> App {
-    App::new(
-        TransmissionClient::new("http://dummy", None, None),
         Config::default(),
     )
 }
@@ -255,50 +240,44 @@ fn test_complete_location_remote_error_cache_prevents_retry() {
 
 #[test]
 fn test_complete_location_remote_ssh_error_sets_last_error() {
-    // Install a fake `ssh` that immediately exits non-zero so this test
-    // does not require network access.
-    use std::io::Write;
-    let fake_dir = tempfile::tempdir().unwrap();
-    let fake_ssh = fake_dir.path().join("ssh");
-    {
-        let mut f = std::fs::File::create(&fake_ssh).unwrap();
-        writeln!(f, "#!/bin/sh").unwrap();
-        writeln!(f, "echo 'Permission denied (publickey).' >&2").unwrap();
-        writeln!(f, "exit 255").unwrap();
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&fake_ssh, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
-    let original_path = std::env::var("PATH").unwrap_or_default();
-    // SAFETY: single-threaded test; no other threads read PATH concurrently.
-    unsafe {
-        std::env::set_var(
-            "PATH",
-            format!("{}:{}", fake_dir.path().display(), original_path),
-        );
-    }
-
     let mut app = App::new(
         TransmissionClient::new("http://remotehost:9091/rpc", None, None),
         Config::default(),
     );
-    let _result = app.complete_location("/srv/");
+    app.remote_dir_lister = |host, dir| {
+        assert_eq!((host, dir), ("remotehost", "/srv/"));
+        Err("Permission denied (publickey).".into())
+    };
 
-    // SAFETY: restoring the value we read above.
-    unsafe { std::env::set_var("PATH", original_path) };
+    assert_eq!(app.complete_location("/srv/"), None);
 
-    assert!(
-        app.last_error.is_some(),
-        "SSH failure should set last_error"
+    assert_eq!(
+        app.last_error.as_deref(),
+        Some("SSH directory listing failed: Permission denied (publickey).")
     );
-    assert!(
-        app.error_since.is_some(),
-        "SSH failure should set error_since"
-    );
-    // Cache populated with empty listing so repeated presses don't retry.
+    assert!(app.error_since.is_some());
     assert_eq!(app.location_dir_cache, Some(("/srv/".to_string(), vec![])));
+}
+
+#[test]
+fn test_complete_location_remote_success_populates_cache() {
+    let mut app = App::new(
+        TransmissionClient::new("http://remotehost:9091/rpc", None, None),
+        Config::default(),
+    );
+    app.remote_dir_lister = |host, dir| {
+        assert_eq!((host, dir), ("remotehost", "/srv/"));
+        Ok(vec!["/srv/media".into(), "/srv/archive".into()])
+    };
+
+    assert_eq!(app.complete_location("/srv/me"), Some("/srv/media/".into()));
+    assert_eq!(
+        app.location_dir_cache,
+        Some((
+            "/srv/".into(),
+            vec!["/srv/media".into(), "/srv/archive".into()]
+        ))
+    );
 }
 
 #[test]
@@ -320,3 +299,269 @@ fn test_complete_location_remote_cache_miss_then_hit() {
     assert_eq!(r2, Some("/data/active/".to_string()));
 }
 
+fn app_for_server(server: &ScriptedServer) -> App {
+    App::new(
+        TransmissionClient::new(&server.url, None, Some(2)),
+        Config::default(),
+    )
+}
+
+fn local_app() -> App {
+    App::new(
+        TransmissionClient::new("http://localhost:9091/transmission/rpc", None, None),
+        Config::default(),
+    )
+}
+
+#[test]
+fn adjust_file_priority_sends_selected_transitions_and_refreshes_detail() {
+    let server = ScriptedServer::start(vec![
+        success(serde_json::json!({})),
+        success(serde_json::json!({"torrents": [{
+            "id": 17,
+            "fileStats": [
+                {"wanted": true, "priority": 0},
+                {"wanted": false, "priority": 0}
+            ]
+        }]})),
+        success(serde_json::json!({})),
+        success(serde_json::json!({"torrents": [{
+            "id": 17,
+            "fileStats": [{"wanted": true, "priority": -1}]
+        }]})),
+    ]);
+    let mut app = app_for_server(&server);
+    app.detail_torrent = Some(Torrent {
+        id: 17,
+        file_stats: vec![
+            FileStats {
+                wanted: true,
+                priority: -1,
+                ..Default::default()
+            },
+            FileStats {
+                wanted: true,
+                priority: 1,
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    });
+    app.file_selected.extend([0, 1]);
+
+    app.adjust_file_priority(true);
+
+    let mutation = server.request();
+    assert_eq!(mutation.method(), "torrent-set");
+    assert_eq!(
+        mutation.arguments(),
+        &serde_json::json!({
+            "ids": [17],
+            "priority-normal": [0],
+            "files-wanted": [0],
+            "files-unwanted": [1]
+        })
+    );
+    let refresh = server.request();
+    assert_eq!(refresh.method(), "torrent-get");
+    assert_eq!(refresh.arguments()["ids"], serde_json::json!([17]));
+    assert!(app.file_selected.is_empty());
+    assert!(!app.detail_torrent.as_ref().unwrap().file_stats[1].wanted);
+
+    app.file_selected.insert(0);
+    app.adjust_file_priority(false);
+    assert_eq!(
+        server.request().arguments(),
+        &serde_json::json!({
+            "ids": [17],
+            "priority-low": [0],
+            "files-wanted": [0]
+        })
+    );
+    assert_eq!(server.request().method(), "torrent-get");
+    assert_eq!(
+        app.detail_torrent.as_ref().unwrap().file_stats[0].priority,
+        -1
+    );
+}
+
+#[test]
+fn toggle_file_wanted_sends_inverse_states_for_selected_files() {
+    let server = ScriptedServer::start(vec![
+        success(serde_json::json!({})),
+        success(serde_json::json!({"torrents": [{"id": 21}]})),
+    ]);
+    let mut app = app_for_server(&server);
+    app.detail_torrent = Some(Torrent {
+        id: 21,
+        file_stats: vec![
+            FileStats {
+                wanted: true,
+                priority: 0,
+                ..Default::default()
+            },
+            FileStats {
+                wanted: false,
+                priority: 0,
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    });
+    app.file_selected.extend([0, 1]);
+
+    app.toggle_file_wanted();
+
+    assert_eq!(
+        server.request().arguments(),
+        &serde_json::json!({
+            "ids": [21],
+            "priority-normal": [1],
+            "files-wanted": [1],
+            "files-unwanted": [0]
+        })
+    );
+    assert_eq!(server.request().method(), "torrent-get");
+    assert!(app.file_selected.is_empty());
+}
+
+#[test]
+fn toggle_file_wanted_preserves_selection_when_rpc_fails() {
+    let server = ScriptedServer::start(vec![crate::test_support::Response::status(
+        503,
+        "Service Unavailable",
+    )]);
+    let mut app = app_for_server(&server);
+    app.detail_torrent = Some(Torrent {
+        id: 21,
+        file_stats: vec![FileStats {
+            wanted: true,
+            priority: 0,
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    app.file_selected.insert(0);
+
+    app.toggle_file_wanted();
+
+    assert_eq!(
+        app.last_error.as_deref(),
+        Some("HTTP 503 Service Unavailable")
+    );
+    assert_eq!(app.file_selected, BTreeSet::from([0]));
+    server.request();
+}
+
+#[test]
+fn file_mutations_are_noops_without_a_detail_or_valid_file() {
+    let mut app = empty_app();
+    app.adjust_file_priority(true);
+    app.toggle_file_wanted();
+    assert!(app.last_error.is_none());
+
+    app.detail_torrent = Some(Torrent {
+        id: 1,
+        file_stats: vec![],
+        ..Default::default()
+    });
+    app.file_cursor = 4;
+    app.adjust_file_priority(false);
+    app.toggle_file_wanted();
+    assert!(app.last_error.is_none());
+
+    let mut local = local_app();
+    local.delete_files_from_disk();
+    assert!(local.last_error.is_none());
+}
+
+#[test]
+fn delete_files_from_disk_removes_safe_targets_and_reports_rejected_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let downloads = dir.path().join("downloads");
+    let outside = dir.path().join("outside.txt");
+    std::fs::create_dir(&downloads).unwrap();
+    std::fs::write(downloads.join("remove.txt"), "remove me").unwrap();
+    std::fs::write(&outside, "must remain").unwrap();
+
+    let mut app = local_app();
+    app.detail_torrent = Some(Torrent {
+        id: 1,
+        download_dir: downloads.to_string_lossy().into_owned(),
+        files: vec![
+            TorrentFile {
+                name: "remove.txt".into(),
+                ..Default::default()
+            },
+            TorrentFile {
+                name: "../outside.txt".into(),
+                ..Default::default()
+            },
+            TorrentFile {
+                name: "missing.txt".into(),
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    });
+    app.file_selected.extend([0, 1, 2]);
+
+    app.delete_files_from_disk();
+
+    assert!(!downloads.join("remove.txt").exists());
+    assert!(outside.exists());
+    let error = app.last_error.as_deref().unwrap();
+    assert!(error.contains("unsafe path rejected"), "{error}");
+    assert!(error.contains("missing.txt"), "{error}");
+    assert!(app.file_selected.is_empty());
+}
+
+#[test]
+fn delete_files_from_disk_rejects_unknown_download_directory() {
+    let mut app = local_app();
+    app.detail_torrent = Some(Torrent {
+        files: vec![TorrentFile {
+            name: "file.txt".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+
+    app.delete_files_from_disk();
+
+    assert_eq!(
+        app.last_error.as_deref(),
+        Some("unknown download directory")
+    );
+}
+
+#[test]
+fn location_completion_falls_back_to_distinct_known_torrent_directories() {
+    let mut local = local_app();
+    local.torrents = vec![
+        Torrent {
+            download_dir: "/known/archive".into(),
+            ..Default::default()
+        },
+        Torrent {
+            download_dir: "/known/archive".into(),
+            ..Default::default()
+        },
+        Torrent::default(),
+    ];
+    assert_eq!(
+        local.complete_location("/known/ar"),
+        Some("/known/archive/".into())
+    );
+
+    let mut remote = App::new(
+        TransmissionClient::new("http://remote.example:9091/rpc", None, None),
+        Config::default(),
+    );
+    remote.torrents = local.torrents;
+    remote.location_dir_cache = Some(("/known/".into(), vec![]));
+    assert_eq!(
+        remote.complete_location("/known/ar"),
+        Some("/known/archive/".into())
+    );
+}

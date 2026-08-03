@@ -5,6 +5,8 @@ mod credentials;
 mod protocol;
 #[cfg(feature = "rsync")]
 mod rsync;
+#[cfg(test)]
+mod test_support;
 mod ui;
 mod util;
 
@@ -138,20 +140,80 @@ fn init_keyring_backend() {
 
 #[cfg(not(target_os = "linux"))]
 fn init_keyring_backend() {}
+
+fn resolve_url(args: &Args, config: &config::Config) -> (String, Option<String>) {
+    let url = if !args.url.is_empty() {
+        args.url.clone()
+    } else if let Some(url) = config.connection.url.clone() {
+        url
+    } else {
+        "http://localhost:9091/transmission/rpc".to_string()
+    };
+    let pending_url = (!args.url.is_empty()).then(|| url.clone());
+    (url, pending_url)
+}
+
+fn resolve_auth<S, L>(
+    args: &Args,
+    config: &mut config::Config,
+    url: &str,
+    save_credentials: S,
+    load_credentials: L,
+) -> (Option<(String, String)>, bool)
+where
+    S: FnOnce(&str, &str, &str) -> Result<(), String>,
+    L: FnOnce(&str) -> Option<(String, String)>,
+{
+    let username = args
+        .username
+        .as_deref()
+        .or(config.connection.username.as_deref())
+        .map(str::to_string);
+    let password = args
+        .password
+        .as_deref()
+        .or(config.connection.password.as_deref())
+        .map(str::to_string);
+
+    match (username, password) {
+        (Some(username), Some(password)) => {
+            config.connection.url = Some(url.to_string());
+            if save_credentials(url, &username, &password).is_err() {
+                config.connection.username = Some(username.clone());
+                config.connection.password = Some(password.clone());
+            } else {
+                config.connection.username = None;
+                config.connection.password = None;
+            }
+            (Some((username, password)), true)
+        }
+        _ => (load_credentials(url), false),
+    }
+}
+
+fn should_warn_insecure_auth(url: &str, has_auth: bool) -> bool {
+    if !has_auth {
+        return false;
+    }
+    let Ok(url) = url::Url::parse(url) else {
+        return false;
+    };
+    if url.scheme() != "http" {
+        return false;
+    }
+    !url.host().is_some_and(|host| match host {
+        url::Host::Domain(host) => host.eq_ignore_ascii_case("localhost"),
+        url::Host::Ipv4(address) => address.is_loopback(),
+        url::Host::Ipv6(address) => address.is_loopback(),
+    })
+}
+
 fn main() -> std::io::Result<()> {
     init_keyring_backend();
     let mut config = config::Config::load();
     let args = parse_args();
 
-    let url = if !args.url.is_empty() {
-        args.url.clone()
-    } else if let Some(u) = config.connection.url.clone() {
-        u
-    } else {
-        "http://localhost:9091/transmission/rpc".to_string()
-    };
-
-    let pending_url = (!args.url.is_empty()).then(|| url.clone());
+    let (url, pending_url) = resolve_url(&args, &config);
 
     if args.clear_auth {
         match credentials::delete(&url) {
@@ -165,51 +227,18 @@ fn main() -> std::io::Result<()> {
         return Ok(());
     }
 
-    let cli_username = args
-        .username
-        .as_deref()
-        .or(config.connection.username.as_deref())
-        .map(str::to_string);
-    let cli_password = args
-        .password
-        .as_deref()
-        .or(config.connection.password.as_deref())
-        .map(str::to_string);
+    let (auth, config_changed) = resolve_auth(
+        &args,
+        &mut config,
+        &url,
+        credentials::save,
+        credentials::load,
+    );
+    if config_changed {
+        config.save();
+    }
 
-    let auth: Option<(String, String)> = match (&cli_username, &cli_password) {
-        (Some(u), Some(p)) => {
-            config.connection.url = Some(url.clone());
-            if credentials::save(&url, u, p).is_err() {
-                config.connection.username = Some(u.clone());
-                config.connection.password = Some(p.clone());
-            } else {
-                config.connection.username = None;
-                config.connection.password = None;
-            }
-            config.save();
-            Some((u.clone(), p.clone()))
-        }
-        _ => {
-            // First try to load from the keyring
-            credentials::load(&url).or_else(|| {
-                // If keyring is empty, check if we have them in the config file
-                if let (Some(u), Some(p)) =
-                    (&config.connection.username, &config.connection.password)
-                {
-                    Some((u.clone(), p.clone()))
-                } else {
-                    None
-                }
-            })
-        }
-    };
-
-    if auth.is_some()
-        && url.starts_with("http://")
-        && !url.contains("localhost")
-        && !url.contains("127.0.0.1")
-        && !url.contains("[::1]")
-    {
+    if should_warn_insecure_auth(&url, auth.is_some()) {
         eprintln!("warning: credentials are being sent over plain HTTP to a remote host");
         eprintln!("  consider fronting Transmission with an HTTPS reverse proxy");
     }

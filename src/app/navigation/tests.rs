@@ -2,47 +2,11 @@
 use super::*;
 use crate::client::TransmissionClient;
 use crate::config::Config;
-use crate::protocol::{Torrent, SessionStats, FreeSpace, TrackerStats};
-use crossterm::event::{KeyCode, KeyModifiers, KeyEvent};
+use crate::protocol::{FreeSpace, SessionStats, Torrent, TrackerStats};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Instant;
-
-
-fn make_key(
-    code: crossterm::event::KeyCode,
-    modifiers: crossterm::event::KeyModifiers,
-) -> crossterm::event::KeyEvent {
-    use crossterm::event::{KeyEventKind, KeyEventState};
-    crossterm::event::KeyEvent {
-        code,
-        modifiers,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::empty(),
-    }
-}
-
-fn empty_app() -> App {
-    App::new(
-        TransmissionClient::new("http://dummy.invalid:9091/transmission/rpc", None, None),
-        Config::default(),
-    )
-}
-
-fn torrent_in_list(app: &mut App) {
-    app.torrents = vec![Torrent {
-        id: 1,
-        ..Default::default()
-    }];
-    app.rebuild_filter();
-}
-
-fn make_app() -> App {
-    App::new(
-        TransmissionClient::new("http://dummy", None, None),
-        Config::default(),
-    )
-}
 
 #[test]
 fn test_target_ids_cursor() {
@@ -245,4 +209,3 @@ fn test_clamp_file_cursor_with_files() {
     app.clamp_file_cursor();
     assert_eq!(app.file_cursor, 1);
 }
-

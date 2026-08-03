@@ -279,3 +279,112 @@ fn test_draw_with_torrents_in_list() {
     let mut term = make_terminal();
     term.draw(|f| super::draw(f, &app)).unwrap();
 }
+
+fn app_with_url(url: &str) -> App {
+    App::new(TransmissionClient::new(url, None, None), Config::default())
+}
+
+#[test]
+fn local_location_suggestions_prefer_filesystem_then_known_daemon_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("filesystem-match")).unwrap();
+    let input = format!("{}/file", dir.path().display());
+    let mut app = app_with_url("http://localhost:9091/transmission/rpc");
+    app.torrents = vec![Torrent {
+        download_dir: format!("{}/file-from-daemon", dir.path().display()),
+        ..Default::default()
+    }];
+
+    assert_eq!(
+        super::location_suggestions(&input, &app),
+        [format!("{}/filesystem-match", dir.path().display())]
+    );
+
+    let missing_input = "/definitely-missing-parent/known";
+    app.torrents = vec![Torrent {
+        download_dir: "/definitely-missing-parent/known-daemon-dir".into(),
+        ..Default::default()
+    }];
+    assert_eq!(
+        super::location_suggestions(missing_input, &app),
+        ["/definitely-missing-parent/known-daemon-dir"]
+    );
+}
+
+#[test]
+fn matching_remote_cache_is_authoritative_for_location_suggestions() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("local-only")).unwrap();
+    let input = format!("{}/lo", dir.path().display());
+    let mut app = app_with_url("http://remote.example:9091/transmission/rpc");
+    let parent = crate::util::location_parent_dir(&input);
+    app.location_dir_cache = Some((
+        parent,
+        vec![
+            format!("{}/logs", dir.path().display()),
+            format!("{}/lost+found", dir.path().display()),
+        ],
+    ));
+
+    assert_eq!(
+        super::location_suggestions(&input, &app),
+        [
+            format!("{}/logs", dir.path().display()),
+            format!("{}/lost+found", dir.path().display())
+        ]
+    );
+}
+
+#[test]
+fn attempted_remote_listing_never_leaks_local_filesystem_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("local-secret")).unwrap();
+    let input = format!("{}/loc", dir.path().display());
+    let mut app = app_with_url("http://remote.example:9091/transmission/rpc");
+    app.torrents = vec![Torrent {
+        download_dir: format!("{}/location-from-daemon", dir.path().display()),
+        ..Default::default()
+    }];
+    app.location_dir_cache = Some((crate::util::location_parent_dir(&input), vec![]));
+
+    let suggestions = super::location_suggestions(&input, &app);
+    assert_eq!(
+        suggestions,
+        [format!("{}/location-from-daemon", dir.path().display())]
+    );
+    assert!(
+        suggestions
+            .iter()
+            .all(|path| !path.contains("local-secret"))
+    );
+}
+
+#[test]
+fn remote_suggestions_use_known_paths_before_local_fallback() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("local-match")).unwrap();
+    let input = format!("{}/lo", dir.path().display());
+    let mut app = app_with_url("http://remote.example:9091/transmission/rpc");
+    app.torrents = vec![
+        Torrent {
+            download_dir: format!("{}/logs", dir.path().display()),
+            ..Default::default()
+        },
+        Torrent {
+            download_dir: format!("{}/logs", dir.path().display()),
+            ..Default::default()
+        },
+    ];
+    app.location_dir_cache = Some(("/different/".into(), vec!["/different/path".into()]));
+
+    assert_eq!(
+        super::location_suggestions(&input, &app),
+        [format!("{}/logs", dir.path().display())]
+    );
+
+    app.torrents.clear();
+    assert_eq!(
+        super::location_suggestions(&input, &app),
+        [format!("{}/local-match", dir.path().display())]
+    );
+}

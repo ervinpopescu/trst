@@ -2,12 +2,12 @@
 use super::*;
 use crate::client::TransmissionClient;
 use crate::config::Config;
-use crate::protocol::{Torrent, SessionStats, FreeSpace, TrackerStats};
-use crossterm::event::{KeyCode, KeyModifiers, KeyEvent};
+use crate::protocol::{FreeSpace, SessionStats, Torrent, TrackerStats};
+use crate::test_support::{ScriptedServer, success};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Instant;
-
 
 fn make_key(
     code: crossterm::event::KeyCode,
@@ -1368,3 +1368,352 @@ fn test_tab_completes_add_location_modal() {
     }
 }
 
+fn app_for_server(server: &ScriptedServer) -> App {
+    App::new(
+        TransmissionClient::new(&server.url, None, Some(2)),
+        Config::default(),
+    )
+}
+
+fn set_torrents(app: &mut App, torrents: Vec<Torrent>) {
+    app.torrents = torrents;
+    app.rebuild_filter();
+}
+
+#[test]
+fn enter_and_details_open_the_requested_torrent_from_rpc() {
+    let files_server = ScriptedServer::start(vec![success(serde_json::json!({
+        "torrents": [{"id": 7, "name": "from daemon"}]
+    }))]);
+    let mut files_app = app_for_server(&files_server);
+    set_torrents(
+        &mut files_app,
+        vec![Torrent {
+            id: 7,
+            name: "stale".into(),
+            ..Default::default()
+        }],
+    );
+    files_app.file_selected.insert(3);
+
+    files_app.handle_torrent_list_key(make_key(KeyCode::Enter, KeyModifiers::NONE));
+
+    assert_eq!(files_app.view, View::Files);
+    assert_eq!(
+        files_app.detail_torrent.as_ref().unwrap().name,
+        "from daemon"
+    );
+    assert!(files_app.file_selected.is_empty());
+    assert_eq!(
+        files_server.request().arguments()["ids"],
+        serde_json::json!([7])
+    );
+
+    let details_server = ScriptedServer::start(vec![success(serde_json::json!({
+        "torrents": [{"id": 9, "name": "details"}]
+    }))]);
+    let mut details_app = app_for_server(&details_server);
+    set_torrents(
+        &mut details_app,
+        vec![Torrent {
+            id: 9,
+            ..Default::default()
+        }],
+    );
+
+    details_app.handle_torrent_list_key(make_key(KeyCode::Tab, KeyModifiers::NONE));
+
+    assert_eq!(details_app.view, View::Details);
+    assert_eq!(details_app.detail_torrent.as_ref().unwrap().name, "details");
+    details_server.request();
+}
+
+#[test]
+fn missing_torrent_from_daemon_surfaces_user_facing_error() {
+    let server = ScriptedServer::start(vec![
+        success(serde_json::json!({"torrents": []})),
+        success(serde_json::json!({"torrents": []})),
+    ]);
+    let mut app = app_for_server(&server);
+    set_torrents(
+        &mut app,
+        vec![Torrent {
+            id: 5,
+            ..Default::default()
+        }],
+    );
+
+    app.handle_torrent_list_key(make_key(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(app.last_error.as_deref(), Some("torrent not found"));
+    server.request();
+
+    app.last_error = None;
+    app.handle_torrent_list_key(make_key(KeyCode::Tab, KeyModifiers::NONE));
+    assert_eq!(app.last_error.as_deref(), Some("torrent not found"));
+    server.request();
+}
+
+#[test]
+fn pause_splits_mixed_selection_into_start_and_stop_requests() {
+    let server = ScriptedServer::start(vec![
+        success(serde_json::json!({})),
+        success(serde_json::json!({})),
+    ]);
+    let mut app = app_for_server(&server);
+    set_torrents(
+        &mut app,
+        vec![
+            Torrent {
+                id: 2,
+                status: 0,
+                ..Default::default()
+            },
+            Torrent {
+                id: 3,
+                status: 4,
+                ..Default::default()
+            },
+        ],
+    );
+    app.selected.extend([0, 1]);
+
+    app.handle_torrent_list_key(make_key(KeyCode::Char('p'), KeyModifiers::NONE));
+
+    let start = server.request();
+    let stop = server.request();
+    assert_eq!(
+        (start.method(), start.arguments()),
+        ("torrent-start", &serde_json::json!({"ids": [2]}))
+    );
+    assert_eq!(
+        (stop.method(), stop.arguments()),
+        ("torrent-stop", &serde_json::json!({"ids": [3]}))
+    );
+    assert!(app.selected.is_empty());
+}
+
+#[test]
+fn torrent_commands_send_selected_ids_and_requested_modes() {
+    let server = ScriptedServer::start((0..5).map(|_| success(serde_json::json!({}))).collect());
+    let mut app = app_for_server(&server);
+    set_torrents(
+        &mut app,
+        vec![Torrent {
+            id: 12,
+            sequential_download: false,
+            ..Default::default()
+        }],
+    );
+
+    app.handle_torrent_list_key(make_key(KeyCode::Char('K'), KeyModifiers::SHIFT));
+    assert_eq!(server.request().method(), "queue-move-up");
+    app.handle_torrent_list_key(make_key(KeyCode::Char('J'), KeyModifiers::SHIFT));
+    assert_eq!(server.request().method(), "queue-move-down");
+
+    app.handle_torrent_list_key(make_key(KeyCode::Char('t'), KeyModifiers::NONE));
+    assert_eq!(server.request().method(), "torrent-reannounce");
+    app.handle_torrent_list_key(make_key(KeyCode::Char('v'), KeyModifiers::NONE));
+    assert_eq!(server.request().method(), "torrent-verify");
+    app.handle_torrent_list_key(make_key(KeyCode::Char('e'), KeyModifiers::NONE));
+    let sequential = server.request();
+    assert_eq!(sequential.method(), "torrent-set");
+    assert_eq!(sequential.arguments()["sequential_download"], true);
+    assert!(app.selected.is_empty());
+}
+
+#[test]
+fn queue_move_errors_are_visible_to_the_user() {
+    let server = ScriptedServer::start(vec![
+        crate::test_support::Response::status(503, "Service Unavailable"),
+        crate::test_support::Response::status(502, "Bad Gateway"),
+    ]);
+    let mut app = app_for_server(&server);
+    set_torrents(
+        &mut app,
+        vec![Torrent {
+            id: 12,
+            ..Default::default()
+        }],
+    );
+
+    app.handle_torrent_list_key(make_key(KeyCode::Char('K'), KeyModifiers::SHIFT));
+    assert_eq!(
+        app.last_error.as_deref(),
+        Some("HTTP 503 Service Unavailable")
+    );
+    server.request();
+
+    app.handle_torrent_list_key(make_key(KeyCode::Char('J'), KeyModifiers::SHIFT));
+    assert_eq!(app.last_error.as_deref(), Some("HTTP 502 Bad Gateway"));
+    server.request();
+}
+
+#[test]
+fn add_and_change_location_submit_trimmed_modal_values() {
+    let server = ScriptedServer::start(vec![
+        success(serde_json::json!({})),
+        success(serde_json::json!({})),
+    ]);
+    let mut app = app_for_server(&server);
+    app.modal = Some(Modal::AddLocation {
+        url: "magnet:?xt=urn:btih:abc".into(),
+        location: " /downloads ".into(),
+    });
+    app.handle_add_input(make_key(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(
+        server.request().arguments(),
+        &serde_json::json!({
+            "filename": "magnet:?xt=urn:btih:abc",
+            "download-dir": "/downloads"
+        })
+    );
+    assert!(app.modal.is_none());
+
+    set_torrents(
+        &mut app,
+        vec![Torrent {
+            id: 4,
+            ..Default::default()
+        }],
+    );
+    app.modal = Some(Modal::ChangeLocation(" /archive ".into()));
+    app.handle_add_input(make_key(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(
+        server.request().arguments(),
+        &serde_json::json!({"ids": [4], "location": "/archive", "move": true})
+    );
+}
+
+#[test]
+fn label_submission_normalizes_values_then_refreshes_torrents() {
+    let server = ScriptedServer::start(vec![
+        success(serde_json::json!({})),
+        success(serde_json::json!({"torrents": [{"id": 6, "labels": ["linux", "iso"]}]})),
+    ]);
+    let mut app = app_for_server(&server);
+    set_torrents(
+        &mut app,
+        vec![Torrent {
+            id: 6,
+            ..Default::default()
+        }],
+    );
+    app.label_editing = true;
+    app.label_input = " linux, , iso ".into();
+
+    app.handle_label_input();
+
+    let labels = server.request();
+    assert_eq!(
+        labels.arguments()["labels"],
+        serde_json::json!(["linux", "iso"])
+    );
+    assert_eq!(server.request().method(), "torrent-get");
+    assert_eq!(app.torrents[0].labels, ["linux", "iso"]);
+    assert!(!app.label_editing);
+    assert!(app.label_input.is_empty());
+}
+
+#[test]
+fn files_and_details_reannounce_the_active_torrent() {
+    let server = ScriptedServer::start(vec![
+        success(serde_json::json!({})),
+        success(serde_json::json!({})),
+    ]);
+    let mut app = app_for_server(&server);
+    app.detail_torrent = Some(Torrent {
+        id: 33,
+        ..Default::default()
+    });
+
+    app.handle_files_key(make_key(KeyCode::Char('t'), KeyModifiers::NONE));
+    let files = server.request();
+    assert_eq!(files.arguments()["ids"], serde_json::json!([33]));
+
+    app.handle_details_key(make_key(KeyCode::Char('t'), KeyModifiers::NONE));
+    let details = server.request();
+    assert_eq!(details.arguments()["ids"], serde_json::json!([33]));
+}
+
+#[cfg(feature = "rsync")]
+#[test]
+fn rsync_view_keys_refresh_and_return_to_torrent_list() {
+    let mut app = make_app();
+    app.view = View::Rsync;
+
+    app.handle_key(make_key(KeyCode::Char('R'), KeyModifiers::SHIFT));
+    assert_eq!(app.view, View::Rsync);
+    app.handle_key(make_key(KeyCode::Esc, KeyModifiers::NONE));
+    assert_eq!(app.view, View::TorrentList);
+}
+
+#[test]
+fn torrent_list_routes_modal_and_label_input_before_global_shortcuts() {
+    let mut app = make_app();
+    app.modal = Some(Modal::Auth {
+        username: String::new(),
+        password: String::new(),
+        focused: AuthField::Username,
+    });
+    app.handle_key(make_key(KeyCode::Char('a'), KeyModifiers::NONE));
+    assert!(matches!(
+        app.modal,
+        Some(Modal::Auth { ref username, .. }) if username == "a"
+    ));
+
+    app.modal = Some(Modal::AddUrl(String::new()));
+    app.handle_torrent_list_key(make_key(KeyCode::Char('m'), KeyModifiers::NONE));
+    assert!(matches!(app.modal, Some(Modal::AddUrl(ref url)) if url == "m"));
+
+    app.modal = None;
+    app.label_editing = true;
+    app.label_input = "unused-without-targets".into();
+    app.handle_torrent_list_key(make_key(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(!app.label_editing);
+    assert!(app.label_input.is_empty());
+    assert!(app.modal.is_none());
+}
+
+#[test]
+fn add_input_edits_each_text_modal_and_ignores_unrelated_keys() {
+    let mut app = make_app();
+
+    app.modal = Some(Modal::AddUrl("ab".into()));
+    app.handle_add_input(make_key(KeyCode::Backspace, KeyModifiers::NONE));
+    assert!(matches!(app.modal, Some(Modal::AddUrl(ref value)) if value == "a"));
+
+    app.modal = Some(Modal::ChangeLocation("/downloads/x".into()));
+    app.handle_add_input(make_key(KeyCode::Backspace, KeyModifiers::NONE));
+    assert!(matches!(
+        app.modal,
+        Some(Modal::ChangeLocation(ref value)) if value == "/downloads/"
+    ));
+
+    app.modal = Some(Modal::Filter);
+    app.handle_add_input(make_key(KeyCode::Backspace, KeyModifiers::NONE));
+    assert!(matches!(app.modal, Some(Modal::Filter)));
+
+    app.handle_add_input(make_key(KeyCode::F(1), KeyModifiers::NONE));
+    assert!(matches!(app.modal, Some(Modal::Filter)));
+}
+
+#[test]
+fn file_reannounce_errors_are_visible_to_the_user() {
+    let server = ScriptedServer::start(vec![crate::test_support::Response::status(
+        503,
+        "Service Unavailable",
+    )]);
+    let mut app = app_for_server(&server);
+    app.detail_torrent = Some(Torrent {
+        id: 44,
+        ..Default::default()
+    });
+
+    app.handle_files_key(make_key(KeyCode::Char('t'), KeyModifiers::NONE));
+
+    assert_eq!(
+        app.last_error.as_deref(),
+        Some("HTTP 503 Service Unavailable")
+    );
+    assert_eq!(server.request().arguments()["ids"], serde_json::json!([44]));
+}

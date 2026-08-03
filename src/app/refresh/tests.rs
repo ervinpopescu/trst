@@ -2,40 +2,12 @@
 use super::*;
 use crate::client::TransmissionClient;
 use crate::config::Config;
-use crate::protocol::{Torrent, SessionStats, FreeSpace, TrackerStats};
-use crossterm::event::{KeyCode, KeyModifiers, KeyEvent};
+use crate::protocol::{FreeSpace, SessionStats, Torrent, TrackerStats};
+use crate::test_support::{Response, ScriptedServer, success};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Instant;
-
-
-fn make_key(
-    code: crossterm::event::KeyCode,
-    modifiers: crossterm::event::KeyModifiers,
-) -> crossterm::event::KeyEvent {
-    use crossterm::event::{KeyEventKind, KeyEventState};
-    crossterm::event::KeyEvent {
-        code,
-        modifiers,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::empty(),
-    }
-}
-
-fn empty_app() -> App {
-    App::new(
-        TransmissionClient::new("http://dummy.invalid:9091/transmission/rpc", None, None),
-        Config::default(),
-    )
-}
-
-fn torrent_in_list(app: &mut App) {
-    app.torrents = vec![Torrent {
-        id: 1,
-        ..Default::default()
-    }];
-    app.rebuild_filter();
-}
 
 fn make_app() -> App {
     App::new(
@@ -44,17 +16,17 @@ fn make_app() -> App {
     )
 }
 
-#[test]
-fn test_refresh_detail_ok_none_clears_file_state() {
-    // Simulate what refresh_detail() does on Ok(None): the torrent disappeared.
-    // We set up the state as if the user was in the file view, then replicate
-    // the Ok(None) branch and assert all file state is reset.
-    let mut app = App::new(
-        TransmissionClient::new("http://dummy", None, None),
+fn app_for_server(server: &ScriptedServer) -> App {
+    App::new(
+        TransmissionClient::new(&server.url, None, Some(2)),
         Config::default(),
-    );
+    )
+}
 
-    // Put app into file-view state
+#[test]
+fn refresh_detail_missing_torrent_clears_file_state() {
+    let server = ScriptedServer::start(vec![success(serde_json::json!({"torrents": []}))]);
+    let mut app = app_for_server(&server);
     app.view = View::Files;
     app.detail_torrent = Some(Torrent {
         id: 42,
@@ -62,25 +34,17 @@ fn test_refresh_detail_ok_none_clears_file_state() {
         ..Default::default()
     });
     app.file_cursor = 3;
-    app.file_selected.insert(1);
-    app.file_selected.insert(2);
+    app.file_selected.extend([1, 2]);
 
-    // Replicate the Ok(None) branch from refresh_detail()
-    app.detail_torrent = None;
-    app.file_cursor = 0;
-    app.file_selected.clear();
-    app.view = View::TorrentList;
+    app.refresh_detail();
 
-    assert!(app.detail_torrent.is_none(), "detail_torrent must be None");
-    assert_eq!(app.file_cursor, 0, "file_cursor must be reset to 0");
-    assert!(
-        app.file_selected.is_empty(),
-        "file_selected must be cleared"
-    );
-    assert!(
-        matches!(app.view, View::TorrentList),
-        "view must return to TorrentList"
-    );
+    let request = server.request();
+    assert_eq!(request.method(), "torrent-get");
+    assert_eq!(request.arguments()["ids"], serde_json::json!([42]));
+    assert!(app.detail_torrent.is_none());
+    assert_eq!(app.file_cursor, 0);
+    assert!(app.file_selected.is_empty());
+    assert_eq!(app.view, View::TorrentList);
 }
 
 #[test]
@@ -381,3 +345,158 @@ fn test_drain_results_success_clears_error_since() {
     assert!(app.error_since.is_none());
 }
 
+#[test]
+fn refresh_torrents_sorts_filters_and_clears_stale_error() {
+    let server = ScriptedServer::start(vec![success(serde_json::json!({"torrents": [
+        {"id": 2, "name": "Zulu"},
+        {"id": 1, "name": "Alpha"}
+    ]}))]);
+    let mut app = app_for_server(&server);
+    app.sort_column = SortColumn::Name;
+    app.sort_ascending = true;
+    app.cursor = 9;
+    app.last_error = Some("stale".into());
+    app.error_since = Some(Instant::now());
+
+    app.refresh_torrents();
+
+    assert_eq!(
+        app.torrents
+            .iter()
+            .map(|torrent| torrent.id)
+            .collect::<Vec<_>>(),
+        [1, 2]
+    );
+    assert_eq!(app.cursor, 1);
+    assert!(app.last_error.is_none());
+    assert!(app.error_since.is_none());
+    assert_eq!(server.request().method(), "torrent-get");
+}
+
+#[test]
+fn synchronous_refreshes_surface_transport_errors() {
+    let torrent_server = ScriptedServer::start(vec![Response::status(500, "Broken")]);
+    let mut app = app_for_server(&torrent_server);
+    app.refresh_torrents();
+    assert_eq!(
+        app.last_error.as_deref(),
+        Some("HTTP 500 Internal Server Error")
+    );
+    torrent_server.request();
+
+    let detail_server = ScriptedServer::start(vec![Response::status(502, "Bad Gateway")]);
+    let mut app = app_for_server(&detail_server);
+    app.detail_torrent = Some(Torrent {
+        id: 8,
+        ..Default::default()
+    });
+    app.refresh_detail();
+    assert_eq!(app.last_error.as_deref(), Some("HTTP 502 Bad Gateway"));
+    detail_server.request();
+}
+
+#[test]
+fn refresh_detail_updates_torrent_and_clamps_file_cursor() {
+    let server = ScriptedServer::start(vec![success(serde_json::json!({"torrents": [{
+        "id": 8,
+        "name": "updated",
+        "files": [{"name": "only-file", "length": 10}],
+        "fileStats": [{"wanted": true, "priority": 0}]
+    }]}))]);
+    let mut app = app_for_server(&server);
+    app.detail_torrent = Some(Torrent {
+        id: 8,
+        ..Default::default()
+    });
+    app.file_cursor = 7;
+
+    app.refresh_detail();
+
+    assert_eq!(app.detail_torrent.as_ref().unwrap().name, "updated");
+    assert_eq!(app.file_cursor, 0);
+    assert_eq!(server.request().arguments()["ids"], serde_json::json!([8]));
+}
+
+fn wait_for_background_refresh(app: &mut App) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while app.refresh_in_flight && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        app.drain_results();
+    }
+    assert!(!app.refresh_in_flight, "background refresh did not finish");
+}
+
+#[test]
+fn background_torrent_refresh_discovers_directory_stats_and_free_space() {
+    let server = ScriptedServer::start(vec![
+        success(serde_json::json!({"torrents": [{"id": 4, "name": "Linux"}]})),
+        success(serde_json::json!({"torrentCount": 1, "downloadSpeed": 25})),
+        success(serde_json::json!({"torrents": [{"id": 4, "downloadDir": "/downloads"}]})),
+        success(serde_json::json!({"path": "/downloads", "size-bytes": 4096})),
+    ]);
+    let mut app = app_for_server(&server);
+
+    app.trigger_refresh();
+    wait_for_background_refresh(&mut app);
+
+    assert_eq!(app.torrents[0].name, "Linux");
+    assert_eq!(app.stats.as_ref().unwrap().torrent_count, 1);
+    assert_eq!(app.default_download_dir.as_deref(), Some("/downloads"));
+    assert_eq!(app.free.as_ref().unwrap().size_bytes, 4096);
+    let requests = (0..4).map(|_| server.request()).collect::<Vec<_>>();
+    assert_eq!(
+        requests
+            .iter()
+            .map(|request| request.method())
+            .collect::<Vec<_>>(),
+        ["torrent-get", "session-stats", "torrent-get", "free-space"]
+    );
+    assert_eq!(
+        requests[3].arguments(),
+        &serde_json::json!({"path": "/downloads"})
+    );
+}
+
+#[test]
+fn background_detail_refresh_uses_existing_directory_and_skips_periodic_free_space() {
+    let server = ScriptedServer::start(vec![
+        success(serde_json::json!({"torrents": [{"id": 11, "name": "Detail"}]})),
+        success(serde_json::json!({"torrentCount": 1})),
+    ]);
+    let mut app = app_for_server(&server);
+    app.view = View::Details;
+    app.detail_torrent = Some(Torrent {
+        id: 11,
+        ..Default::default()
+    });
+    app.default_download_dir = Some("/existing".into());
+    app.free_space_tick = 1;
+
+    app.trigger_refresh();
+    wait_for_background_refresh(&mut app);
+
+    assert_eq!(app.detail_torrent.as_ref().unwrap().name, "Detail");
+    assert_eq!(app.free_space_tick, 2);
+    assert_eq!(server.request().method(), "torrent-get");
+    assert_eq!(server.request().method(), "session-stats");
+}
+
+#[cfg(feature = "rsync")]
+#[test]
+fn background_rsync_view_refreshes_torrent_list() {
+    let server = ScriptedServer::start(vec![
+        success(serde_json::json!({"torrents": [{"id": 3, "name": "Synced"}]})),
+        success(serde_json::json!({"torrentCount": 1})),
+    ]);
+    let mut app = app_for_server(&server);
+    app.view = View::Rsync;
+    app.default_download_dir = Some("/downloads".into());
+    app.free_space_tick = 1;
+
+    app.trigger_refresh();
+    wait_for_background_refresh(&mut app);
+
+    assert_eq!(app.torrents[0].name, "Synced");
+    assert_eq!(server.request().method(), "torrent-get");
+    assert_eq!(server.request().method(), "session-stats");
+}

@@ -227,48 +227,97 @@ pub fn get_path_suggestions(input: &str) -> Vec<String> {
 /// success or `Err(msg)` when SSH fails (auth denied, host unreachable, timeout, etc.).
 /// Callers should surface the error message so the user knows to configure key auth.
 pub fn list_remote_dirs(host: &str, dir: &str) -> Result<Vec<String>, String> {
+    const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+    list_remote_dirs_with_program(std::path::Path::new("ssh"), host, dir, TIMEOUT)
+}
+
+fn list_remote_dirs_with_program(
+    program: &std::path::Path,
+    host: &str,
+    dir: &str,
+    timeout: std::time::Duration,
+) -> Result<Vec<String>, String> {
     let escaped = dir.replace('\'', "'\\''");
     let cmd = format!(
         "find '{}' -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort",
         escaped
     );
 
-    let (tx, rx) = std::sync::mpsc::channel();
-    let host = host.to_string();
-    std::thread::spawn(move || {
-        let result = std::process::Command::new("ssh")
-            .args([
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "ConnectTimeout=2",
-                "--", // argv terminator: everything after is positional, not a flag
-                &host,
-                &cmd,
-            ])
-            .output();
-        let _ = tx.send(result);
+    let mut child = std::process::Command::new(program)
+        .args([
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=2",
+            "--", // argv terminator: everything after is positional, not a flag
+            host,
+            &cmd,
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("ssh: {e}"))?;
+
+    let Some(stdout) = child.stdout.take() else {
+        let _ = child.kill();
+        return Err("ssh: failed to capture stdout".to_string());
+    };
+    let Some(stderr) = child.stderr.take() else {
+        let _ = child.kill();
+        return Err("ssh: failed to capture stderr".to_string());
+    };
+    let stdout_reader = std::thread::spawn(move || {
+        use std::io::Read as _;
+        let mut bytes = Vec::new();
+        let _ = std::io::BufReader::new(stdout).read_to_end(&mut bytes);
+        bytes
+    });
+    let stderr_reader = std::thread::spawn(move || {
+        use std::io::Read as _;
+        let mut bytes = Vec::new();
+        let _ = std::io::BufReader::new(stderr).read_to_end(&mut bytes);
+        bytes
     });
 
-    match rx.recv_timeout(std::time::Duration::from_secs(3)) {
-        Ok(Ok(output)) if output.status.success() => Ok(String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .map(|l| l.trim_end_matches('/').to_string())
-            .filter(|l| !l.is_empty())
-            .collect()),
-        Ok(Ok(output)) => {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            Err(if stderr.is_empty() {
-                format!(
-                    "ssh exited with status {}",
-                    output.status.code().unwrap_or(-1)
-                )
-            } else {
-                stderr
-            })
+    let deadline = std::time::Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stdout_reader.join();
+                let _ = stderr_reader.join();
+                return Err("ssh: timed out".to_string());
+            }
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stdout_reader.join();
+                let _ = stderr_reader.join();
+                return Err(format!("ssh: {e}"));
+            }
         }
-        Ok(Err(e)) => Err(format!("ssh: {e}")),
-        Err(_) => Err("ssh: timed out".to_string()),
+    };
+
+    let stdout = stdout_reader.join().unwrap_or_default();
+    let stderr = stderr_reader.join().unwrap_or_default();
+    if status.success() {
+        Ok(String::from_utf8_lossy(&stdout)
+            .lines()
+            .map(|line| line.trim_end_matches('/').to_string())
+            .filter(|line| !line.is_empty())
+            .collect())
+    } else {
+        let stderr = String::from_utf8_lossy(&stderr).trim().to_string();
+        Err(if stderr.is_empty() {
+            format!("ssh exited with status {}", status.code().unwrap_or(-1))
+        } else {
+            stderr
+        })
     }
 }
 

@@ -328,43 +328,6 @@ fn test_get_torrent_file_suggestions_includes_symlinks() {
 }
 
 // -------------------------------------------------------------------------
-// list_remote_dirs
-// -------------------------------------------------------------------------
-
-#[test]
-fn test_list_remote_dirs_ssh_failure_returns_err() {
-    // Install a minimal fake `ssh` script that exits non-zero immediately,
-    // so this test requires no network access.
-    let fake_dir = tempfile::tempdir().unwrap();
-    let fake_ssh = fake_dir.path().join("ssh");
-    std::fs::write(
-        &fake_ssh,
-        "#!/bin/sh\necho 'Permission denied (publickey).' >&2\nexit 255",
-    )
-    .unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&fake_ssh, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
-    let original_path = std::env::var("PATH").unwrap_or_default();
-    // Prepend the fake directory so our stub wins over the real ssh.
-    // SAFETY: single-threaded test; no other threads read PATH concurrently.
-    unsafe {
-        std::env::set_var(
-            "PATH",
-            format!("{}:{}", fake_dir.path().display(), original_path),
-        );
-    }
-
-    let result = list_remote_dirs("myhost", "/");
-
-    // SAFETY: restoring the value we read above.
-    unsafe { std::env::set_var("PATH", original_path) };
-    assert!(result.is_err(), "expected Err when ssh exits with failure");
-}
-
-// -------------------------------------------------------------------------
 // get_remote_dir_suggestions
 // -------------------------------------------------------------------------
 
@@ -446,4 +409,110 @@ fn test_autocomplete_remote_path_multiple_no_extension() {
 fn test_autocomplete_remote_path_no_match() {
     let known = vec!["/srv/downloads".to_string()];
     assert_eq!(autocomplete_remote_path("/home/", &known), None);
+}
+
+#[cfg(unix)]
+fn executable_script(dir: &std::path::Path, name: &str, body: &str) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let path = dir.join(name);
+    std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    path
+}
+
+#[cfg(unix)]
+#[test]
+fn remote_directory_listing_parses_output_and_uses_argv_terminator() {
+    let dir = tempfile::tempdir().unwrap();
+    let command_log = dir.path().join("command.txt");
+    let ssh = executable_script(
+        dir.path(),
+        "ssh-success",
+        &format!(
+            r#"
+if [ "$#" -ne 7 ] || [ "$1" != "-o" ] || [ "$2" != "BatchMode=yes" ] ||
+   [ "$3" != "-o" ] || [ "$4" != "ConnectTimeout=2" ] ||
+   [ "$5" != "--" ] || [ "$6" != "remote.example" ]; then
+    echo "unexpected arguments: $*" >&2
+    exit 9
+fi
+printf '%s' "$7" > '{}'
+printf '/srv/alpha/\n\n/srv/beta\n'
+"#,
+            command_log.display()
+        ),
+    );
+
+    let listed = list_remote_dirs_with_program(
+        &ssh,
+        "remote.example",
+        "/srv/it's here/",
+        std::time::Duration::from_secs(1),
+    )
+    .unwrap();
+
+    assert_eq!(listed, ["/srv/alpha", "/srv/beta"]);
+    assert_eq!(
+        std::fs::read_to_string(command_log).unwrap(),
+        "find '/srv/it'\\''s here/' -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn remote_directory_listing_reports_stderr_exit_status_and_spawn_failures() {
+    let dir = tempfile::tempdir().unwrap();
+    let stderr = executable_script(
+        dir.path(),
+        "ssh-stderr",
+        "echo 'Permission denied (publickey).' >&2; exit 255",
+    );
+    assert_eq!(
+        list_remote_dirs_with_program(
+            &stderr,
+            "remote.example",
+            "/srv/",
+            std::time::Duration::from_secs(1)
+        ),
+        Err("Permission denied (publickey).".into())
+    );
+
+    let silent = executable_script(dir.path(), "ssh-silent", "exit 7");
+    assert_eq!(
+        list_remote_dirs_with_program(
+            &silent,
+            "remote.example",
+            "/srv/",
+            std::time::Duration::from_secs(1)
+        ),
+        Err("ssh exited with status 7".into())
+    );
+
+    let missing = dir.path().join("does-not-exist");
+    let error = list_remote_dirs_with_program(
+        &missing,
+        "remote.example",
+        "/srv/",
+        std::time::Duration::from_secs(1),
+    )
+    .unwrap_err();
+    assert!(error.starts_with("ssh: "), "{error}");
+}
+
+#[cfg(unix)]
+#[test]
+fn remote_directory_listing_honors_timeout() {
+    let dir = tempfile::tempdir().unwrap();
+    let slow = executable_script(dir.path(), "ssh-slow", "exec sleep 1");
+
+    assert_eq!(
+        list_remote_dirs_with_program(
+            &slow,
+            "remote.example",
+            "/srv/",
+            std::time::Duration::from_millis(10)
+        ),
+        Err("ssh: timed out".into())
+    );
 }

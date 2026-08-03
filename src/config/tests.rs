@@ -29,8 +29,9 @@ fn test_load_from_non_notfound_error_returns_defaults_without_writing() {
 /// When the config file does not exist load_from must create it and return
 /// defaults.
 #[test]
-fn test_load_from_missing_file_creates_file_with_defaults() {
-    let dir = tempfile::tempdir().expect("tempdir");
+fn test_load_from_missing_file_creates_file_with_defaults() -> Result<(), Box<dyn std::error::Error>>
+{
+    let dir = tempfile::tempdir()?;
     let path = dir.path().join("config.toml");
 
     assert!(!path.exists(), "precondition: file must not exist yet");
@@ -47,8 +48,24 @@ fn test_load_from_missing_file_creates_file_with_defaults() {
     );
 
     // The file is valid TOML that round-trips back to Config.
-    let contents = std::fs::read_to_string(&path).expect("read config file");
-    let _: Config = toml::from_str(&contents).expect("config file must be valid TOML");
+    let contents = std::fs::read_to_string(&path)?;
+    let _: Config = toml::from_str(&contents)?;
+    Ok(())
+}
+
+#[test]
+fn malformed_config_returns_defaults_without_overwriting_the_file()
+-> Result<(), Box<dyn std::error::Error>> {
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("config.toml");
+    let malformed = "[connection\nurl = nope";
+    std::fs::write(&path, malformed)?;
+
+    let cfg = Config::load_from(&path);
+
+    assert!(cfg.connection.url.is_none());
+    assert_eq!(std::fs::read_to_string(path)?, malformed);
+    Ok(())
 }
 
 #[test]
@@ -79,6 +96,22 @@ fn test_keybind_parse() {
     assert_eq!(kb.code, KeyCode::Char('+'));
     assert_eq!(kb.modifiers, KeyModifiers::SHIFT);
 
+    assert!(matches!(
+        KeyBind::parse("alt+left"),
+        Some(KeyBind {
+            code: KeyCode::Left,
+            modifiers: KeyModifiers::ALT,
+        })
+    ));
+    assert!(matches!(
+        KeyBind::parse("ctrl+"),
+        Some(KeyBind {
+            code: KeyCode::Char('+'),
+            modifiers: KeyModifiers::CONTROL,
+        })
+    ));
+
+    assert!(KeyBind::parse("shift+meta+x").is_none());
     assert!(KeyBind::parse("invalid_key").is_none());
 }
 
@@ -117,4 +150,36 @@ fn test_edit_labels_default_binding() {
     let defaults = KeysConfig::default();
     let kb = KeyBind::parse(&defaults.edit_labels).unwrap();
     assert_eq!(kb.code, crossterm::event::KeyCode::Char('L'));
+}
+
+#[test]
+fn default_selection_and_queue_bindings_do_not_conflict() {
+    let bindings = Bindings::from_config(&KeysConfig::default());
+
+    assert!(bindings.select_up.matches(KeyCode::Up, KeyModifiers::SHIFT));
+    assert!(
+        bindings
+            .select_down
+            .matches(KeyCode::Down, KeyModifiers::SHIFT)
+    );
+    assert!(
+        bindings
+            .queue_up
+            .matches(KeyCode::Char('K'), KeyModifiers::SHIFT)
+    );
+    assert!(
+        bindings
+            .queue_down
+            .matches(KeyCode::Char('J'), KeyModifiers::SHIFT)
+    );
+    assert!(
+        !bindings
+            .select_up
+            .matches(bindings.queue_up.code, bindings.queue_up.modifiers)
+    );
+    assert!(
+        !bindings
+            .select_down
+            .matches(bindings.queue_down.code, bindings.queue_down.modifiers)
+    );
 }

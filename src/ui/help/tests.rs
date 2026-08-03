@@ -59,3 +59,34 @@ fn test_format_bind_shift_non_char() {
         "shift+up"
     );
 }
+
+#[test]
+fn format_bind_names_every_supported_navigation_key() {
+    for (code, expected) in [
+        (KeyCode::Tab, "tab"),
+        (KeyCode::Backspace, "backspace"),
+        (KeyCode::Left, "left"),
+        (KeyCode::Right, "right"),
+        (KeyCode::PageUp, "pageup"),
+        (KeyCode::PageDown, "pagedown"),
+        (KeyCode::Insert, "ins"),
+    ] {
+        assert_eq!(format_bind(&kb(code, KeyModifiers::NONE)), expected);
+    }
+    assert_eq!(format_bind(&kb(KeyCode::F(5), KeyModifiers::NONE)), "?");
+}
+
+#[test]
+fn format_bind_orders_combined_modifiers_consistently() {
+    assert_eq!(
+        format_bind(&kb(
+            KeyCode::Left,
+            KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT,
+        )),
+        "ctrl+alt+shift+left"
+    );
+    assert_eq!(
+        format_bind(&kb(KeyCode::Char('x'), KeyModifiers::ALT)),
+        "alt+x"
+    );
+}
