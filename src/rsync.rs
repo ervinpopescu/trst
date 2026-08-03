@@ -35,21 +35,13 @@ fn state_file_path() -> PathBuf {
     xdg_data().join("rsync-torrents/last-active")
 }
 
-fn idle_threshold_from_config() -> u64 {
-    let config = xdg_config().join("rsync-torrents/config.toml");
-    let Ok(text) = fs::read_to_string(&config) else {
-        return 1800;
-    };
-    for line in text.lines() {
-        let line = line.trim();
-        if let Some(rest) = line.strip_prefix("idle_threshold")
-            && let Some(val) = rest.trim_start_matches([' ', '=', '\t']).split('#').next()
-            && let Ok(n) = val.trim().parse::<u64>()
-        {
-            return n;
-        }
-    }
-    1800
+fn idle_threshold_from_config(config: &Path) -> u64 {
+    fs::read_to_string(config)
+        .ok()
+        .and_then(|text| toml::from_str::<toml::Value>(&text).ok())
+        .and_then(|value| value.get("idle_threshold")?.as_integer())
+        .and_then(|value| u64::try_from(value).ok())
+        .unwrap_or(1800)
 }
 
 fn read_hashes(path: &Path) -> Vec<String> {
@@ -85,11 +77,23 @@ fn read_last_active_ts(state_path: &Path) -> Option<u64> {
 
 impl RsyncState {
     pub fn load() -> Self {
+        Self::load_from(
+            &hashes_path(),
+            &log_path(),
+            &state_file_path(),
+            &xdg_config().join("rsync-torrents/config.toml"),
+        )
+    }
+
+    fn load_from(hashes: &Path, log: &Path, state: &Path, config: &Path) -> Self {
         Self {
-            synced_hashes: read_hashes(&hashes_path()),
-            log_lines: tail_log(&log_path(), LOG_TAIL),
-            last_active_ts: read_last_active_ts(&state_file_path()),
-            idle_threshold: idle_threshold_from_config(),
+            synced_hashes: read_hashes(hashes),
+            log_lines: tail_log(log, LOG_TAIL),
+            last_active_ts: read_last_active_ts(state),
+            idle_threshold: idle_threshold_from_config(config),
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

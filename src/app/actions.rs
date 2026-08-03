@@ -34,7 +34,7 @@ impl App {
                         .map(|(_, v)| v.clone())
                         .unwrap_or_default()
                 } else {
-                    match util::list_remote_dirs(&host, &dir) {
+                    match (self.remote_dir_lister)(&host, &dir) {
                         Ok(dirs) => {
                             self.location_dir_cache = Some((dir, dirs.clone()));
                             dirs

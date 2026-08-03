@@ -8,6 +8,7 @@ use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 
 use crate::app::App;
 use crate::config::parse_color;
+use crate::rsync::RsyncState;
 
 pub fn draw(f: &mut Frame, app: &App, area: Rect) {
     let th = &app.theme;
@@ -69,7 +70,17 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         .duration_since(UNIX_EPOCH)
         .unwrap_or(Duration::ZERO)
         .as_secs();
-    let idle_line = match state.last_active_ts {
+    let idle_widget = Paragraph::new(idle_line(state, now)).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Idle timer ")
+            .border_style(Style::default().fg(accent)),
+    );
+    f.render_widget(idle_widget, chunks[2]);
+}
+
+fn idle_line(state: &RsyncState, now: u64) -> Line<'static> {
+    match state.last_active_ts {
         None => Line::from(Span::styled(
             " rsync-torrents: no state file found ",
             Style::default().fg(Color::DarkGray),
@@ -86,20 +97,12 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
                 Color::Green
             };
             Line::from(Span::styled(
-                format!(
-                    " Idle {}s / {}s  (shutdown in {}s) ",
-                    idle, threshold, remaining
-                ),
+                format!(" Idle {idle}s / {threshold}s  (shutdown in {remaining}s) "),
                 Style::default().fg(color),
             ))
         }
-    };
-
-    let idle_widget = Paragraph::new(idle_line).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" Idle timer ")
-            .border_style(Style::default().fg(accent)),
-    );
-    f.render_widget(idle_widget, chunks[2]);
+    }
 }
+
+#[cfg(test)]
+mod tests;

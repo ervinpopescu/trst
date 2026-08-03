@@ -18,6 +18,8 @@ use crate::protocol::*;
 use crate::ui;
 use crate::util;
 
+type RemoteDirLister = fn(&str, &str) -> Result<Vec<String>, String>;
+
 enum RefreshMsg {
     Torrents(Result<Vec<Torrent>, String>),
     Detail(Box<Result<Option<Torrent>, String>>),
@@ -179,6 +181,7 @@ pub struct App {
     // Populated on Tab press; avoids redundant SSH round-trips when completing
     // within the same parent directory.
     pub location_dir_cache: Option<(String, Vec<String>)>,
+    pub(crate) remote_dir_lister: RemoteDirLister,
 }
 
 impl App {
@@ -218,6 +221,7 @@ impl App {
             refresh_in_flight: false,
             pending_url_save: None,
             location_dir_cache: None,
+            remote_dir_lister: util::list_remote_dirs,
         }
     }
 
@@ -226,47 +230,29 @@ impl App {
         self
     }
 
+    fn daemon_host(&self) -> Option<(String, bool)> {
+        let url = url::Url::parse(&self.client.url).ok()?;
+        match url.host()? {
+            url::Host::Domain(host) => {
+                Some((host.to_string(), host.eq_ignore_ascii_case("localhost")))
+            }
+            url::Host::Ipv4(address) => Some((address.to_string(), address.is_loopback())),
+            url::Host::Ipv6(address) => Some((address.to_string(), address.is_loopback())),
+        }
+    }
+
     /// Returns the remote hostname for SSH if the connection is not to localhost.
     pub fn ssh_host(&self) -> Option<String> {
-        let url = &self.client.url;
-        let after_scheme = url
-            .strip_prefix("http://")
-            .or_else(|| url.strip_prefix("https://"))?;
-        let host_port = after_scheme.split('/').next()?;
-        // IPv6 literals are bracketed: [::1]:9091 — strip brackets before comparing.
-        let host = if host_port.starts_with('[') {
-            host_port.split(']').next()?.trim_start_matches('[')
+        let (host, is_local) = self.daemon_host()?;
+        if is_local || host.starts_with('-') {
+            None
         } else {
-            host_port.split(':').next()?.trim()
-        };
-        match host {
-            "" | "localhost" | "127.0.0.1" | "::1" => None,
-            // Reject flag-shaped hostnames to prevent argv flag smuggling in ssh invocations.
-            h if h.starts_with('-') => None,
-            h => Some(h.to_string()),
+            Some(host)
         }
     }
 
     pub fn is_local_daemon(&self) -> bool {
-        let url = &self.client.url;
-        // Parse the host from the URL (e.g. "http://127.0.0.1:9091/transmission/rpc")
-        let host = if let Some(after_scheme) = url.find("://").map(|i| &url[i + 3..]) {
-            let host_and_rest = after_scheme.split('/').next().unwrap_or("");
-            // Strip port if present
-            if host_and_rest.starts_with('[') {
-                // IPv6 literal: [::1]:port
-                host_and_rest
-                    .trim_start_matches('[')
-                    .split(']')
-                    .next()
-                    .unwrap_or("")
-            } else {
-                host_and_rest.split(':').next().unwrap_or("")
-            }
-        } else {
-            ""
-        };
-        matches!(host, "localhost" | "127.0.0.1" | "::1")
+        self.daemon_host().is_some_and(|(_, is_local)| is_local)
     }
 
     pub fn run(mut self, mut terminal: DefaultTerminal) -> std::io::Result<()> {

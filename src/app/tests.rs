@@ -2,47 +2,11 @@
 use super::*;
 use crate::client::TransmissionClient;
 use crate::config::Config;
-use crate::protocol::{Torrent, SessionStats, FreeSpace, TrackerStats};
-use crossterm::event::{KeyCode, KeyModifiers, KeyEvent};
+use crate::protocol::{FreeSpace, SessionStats, Torrent, TrackerStats};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Instant;
-
-
-fn make_key(
-    code: crossterm::event::KeyCode,
-    modifiers: crossterm::event::KeyModifiers,
-) -> crossterm::event::KeyEvent {
-    use crossterm::event::{KeyEventKind, KeyEventState};
-    crossterm::event::KeyEvent {
-        code,
-        modifiers,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::empty(),
-    }
-}
-
-fn empty_app() -> App {
-    App::new(
-        TransmissionClient::new("http://dummy.invalid:9091/transmission/rpc", None, None),
-        Config::default(),
-    )
-}
-
-fn torrent_in_list(app: &mut App) {
-    app.torrents = vec![Torrent {
-        id: 1,
-        ..Default::default()
-    }];
-    app.rebuild_filter();
-}
-
-fn make_app() -> App {
-    App::new(
-        TransmissionClient::new("http://dummy", None, None),
-        Config::default(),
-    )
-}
 
 #[test]
 fn test_cursor_movement() {
@@ -76,48 +40,6 @@ fn test_is_safe_relative_path() {
     assert!(!is_safe_relative_path("../etc/passwd"));
     assert!(!is_safe_relative_path("/absolute/path"));
     assert!(!is_safe_relative_path("./dot/relative"));
-}
-
-#[test]
-fn test_pause_toggles_per_torrent() {
-    // When the selection contains both stopped and running torrents, pause must
-    // start the stopped ones and stop the running ones independently.
-    let mut app = App::new(
-        TransmissionClient::new("http://dummy", None, None),
-        Config::default(),
-    );
-    app.torrents = vec![
-        Torrent {
-            id: 1,
-            status: 0,
-            ..Default::default()
-        }, // stopped
-        Torrent {
-            id: 2,
-            status: 4,
-            ..Default::default()
-        }, // downloading (running)
-        Torrent {
-            id: 3,
-            status: 0,
-            ..Default::default()
-        }, // stopped
-    ];
-    app.rebuild_filter();
-
-    // Verify the per-torrent split logic directly
-    let ids = vec![1i64, 2, 3];
-    let mut stopped_ids: Vec<i64> = Vec::new();
-    let mut running_ids: Vec<i64> = Vec::new();
-    for t in app.torrents.iter().filter(|t| ids.contains(&t.id)) {
-        if t.is_stopped() {
-            stopped_ids.push(t.id);
-        } else {
-            running_ids.push(t.id);
-        }
-    }
-    assert_eq!(stopped_ids, vec![1, 3], "stopped torrents must be started");
-    assert_eq!(running_ids, vec![2], "running torrents must be stopped");
 }
 
 #[cfg(feature = "rsync")]
@@ -343,7 +265,61 @@ fn test_ssh_host_https_scheme() {
 
 #[test]
 fn test_location_parent_dir_relative_no_slash() {
-    // A path with no directory component — parent is "" which is resolved to "/".
+    // A path with no directory component maps to the root cache key.
     assert_eq!(util::location_parent_dir("foo"), "/");
 }
 
+#[test]
+fn sort_column_labels_are_stable_user_facing_names() {
+    assert_eq!(
+        [
+            SortColumn::Name,
+            SortColumn::Size,
+            SortColumn::Progress,
+            SortColumn::Down,
+            SortColumn::Up,
+            SortColumn::Eta,
+            SortColumn::Ratio,
+            SortColumn::Status,
+            SortColumn::Queue,
+        ]
+        .map(SortColumn::label),
+        [
+            "name", "size", "progress", "down", "up", "eta", "ratio", "status", "queue"
+        ]
+    );
+}
+
+#[test]
+fn malformed_or_scheme_less_urls_are_not_treated_as_local_daemons() {
+    for url in ["localhost:9091", "", "://missing-scheme"] {
+        let app = App::new(TransmissionClient::new(url, None, None), Config::default());
+        assert!(!app.is_local_daemon(), "{url:?} must not be assumed local");
+        assert_eq!(app.ssh_host(), None);
+    }
+}
+
+#[test]
+fn userinfo_cannot_disguise_a_remote_daemon_as_local() {
+    let remote = App::new(
+        TransmissionClient::new(
+            "http://localhost:secret@remote.example:9091/transmission/rpc",
+            None,
+            None,
+        ),
+        Config::default(),
+    );
+    assert!(!remote.is_local_daemon());
+    assert_eq!(remote.ssh_host().as_deref(), Some("remote.example"));
+
+    let local = App::new(
+        TransmissionClient::new(
+            "http://user:secret@LOCALHOST:9091/transmission/rpc",
+            None,
+            None,
+        ),
+        Config::default(),
+    );
+    assert!(local.is_local_daemon());
+    assert_eq!(local.ssh_host(), None);
+}

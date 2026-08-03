@@ -2,47 +2,11 @@
 use super::*;
 use crate::client::TransmissionClient;
 use crate::config::Config;
-use crate::protocol::{Torrent, SessionStats, FreeSpace, TrackerStats};
-use crossterm::event::{KeyCode, KeyModifiers, KeyEvent};
+use crate::protocol::{FreeSpace, SessionStats, Torrent, TrackerStats};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Instant;
-
-
-fn make_key(
-    code: crossterm::event::KeyCode,
-    modifiers: crossterm::event::KeyModifiers,
-) -> crossterm::event::KeyEvent {
-    use crossterm::event::{KeyEventKind, KeyEventState};
-    crossterm::event::KeyEvent {
-        code,
-        modifiers,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::empty(),
-    }
-}
-
-fn empty_app() -> App {
-    App::new(
-        TransmissionClient::new("http://dummy.invalid:9091/transmission/rpc", None, None),
-        Config::default(),
-    )
-}
-
-fn torrent_in_list(app: &mut App) {
-    app.torrents = vec![Torrent {
-        id: 1,
-        ..Default::default()
-    }];
-    app.rebuild_filter();
-}
-
-fn make_app() -> App {
-    App::new(
-        TransmissionClient::new("http://dummy", None, None),
-        Config::default(),
-    )
-}
 
 #[test]
 fn test_sort_column() {
@@ -150,6 +114,8 @@ fn test_sorting() {
         total_size: 100,
         percent_done: 0.5,
         rate_download: 50,
+        rate_upload: 10,
+        upload_ratio: 2.0,
         eta: 10,
         queue_position: 2,
         status: 1,
@@ -161,6 +127,8 @@ fn test_sorting() {
         total_size: 200,
         percent_done: 0.8,
         rate_download: 20,
+        rate_upload: 30,
+        upload_ratio: 1.0,
         eta: 20,
         queue_position: 1,
         status: 2,
@@ -199,6 +167,18 @@ fn test_sorting() {
     app.sort_ascending = false;
     app.sort_torrents(&mut list);
     assert_eq!(list[0].name, "B");
+
+    // Sort by Up, desc
+    app.sort_column = SortColumn::Up;
+    app.sort_ascending = false;
+    app.sort_torrents(&mut list);
+    assert_eq!(list[0].name, "A");
+
+    // Sort by Ratio, asc
+    app.sort_column = SortColumn::Ratio;
+    app.sort_ascending = true;
+    app.sort_torrents(&mut list);
+    assert_eq!(list[0].name, "A");
 
     // Sort by ETA, asc
     app.sort_column = SortColumn::Eta;
@@ -288,4 +268,3 @@ fn test_sort_column_index() {
     assert_eq!(SortColumn::Ratio.column_index(), Some(7));
     assert_eq!(SortColumn::Queue.column_index(), None);
 }
-

@@ -259,8 +259,8 @@ impl Default for KeysConfig {
             down: "j".into(),
             top: "g".into(),
             bottom: "G".into(),
-            select_up: "shift+k".into(),
-            select_down: "shift+j".into(),
+            select_up: "shift+up".into(),
+            select_down: "shift+down".into(),
             select_toggle: "space".into(),
 
             enter: "enter".into(),

@@ -17,7 +17,7 @@ fn load_returns_none_for_unknown_url() {
 #[test]
 fn delete_returns_ok_for_unknown_url() {
     let result = delete(&url("delete-miss"));
-    assert!(matches!(result, Ok(_)));
+    assert!(result.is_ok());
 }
 
 #[test]
