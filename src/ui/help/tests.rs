@@ -90,3 +90,20 @@ fn format_bind_orders_combined_modifiers_consistently() {
         "alt+x"
     );
 }
+
+use proptest::prelude::*;
+
+proptest! {
+    #[test]
+    fn prop_format_bind_never_panics(
+        char_val in any::<char>(),
+        bits in 0..255u8
+    ) {
+        // Just verify it doesn't crash on any modifier combinations + chars
+        let mods = KeyModifiers::from_bits_truncate(bits.into());
+        let _ = format_bind(&KeyBind {
+            code: KeyCode::Char(char_val),
+            modifiers: mods,
+        });
+    }
+}

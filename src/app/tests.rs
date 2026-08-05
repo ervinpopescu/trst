@@ -323,3 +323,40 @@ fn userinfo_cannot_disguise_a_remote_daemon_as_local() {
     assert!(local.is_local_daemon());
     assert_eq!(local.ssh_host(), None);
 }
+
+use proptest::prelude::*;
+
+proptest! {
+    #[test]
+    fn prop_is_safe_relative_path_rejects_unsafe(path in ".*") {
+        let is_safe = super::is_safe_relative_path(&path);
+
+        if path.is_empty() {
+            assert!(!is_safe);
+        } else if path.starts_with('/') {
+            assert!(!is_safe);
+        } else if path.contains("..") {
+            // Not strictly true for file names like `foo..bar`, but `Component::ParentDir` checking is robust.
+            // Let's just check standard unsafe things
+            if path == ".." || path.starts_with("../") || path.contains("/../") || path.ends_with("/..") {
+                assert!(!is_safe);
+            }
+        } else if path.starts_with("./") || path == "." {
+            assert!(!is_safe);
+        }
+    }
+}
+
+proptest! {
+    #[test]
+    fn prop_location_parent_dir_never_panics(path in ".*") {
+        let result = crate::util::location_parent_dir(&path);
+        // It should either return the path as is (if empty or ends with /)
+        // or a parent directory with a trailing slash.
+        if path.is_empty() || path.ends_with('/') {
+            assert_eq!(result, path);
+        } else {
+            assert!(result.ends_with('/'));
+        }
+    }
+}

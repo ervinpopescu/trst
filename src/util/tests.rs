@@ -516,3 +516,33 @@ fn remote_directory_listing_honors_timeout() {
         Err("ssh: timed out".into())
     );
 }
+
+use proptest::prelude::*;
+
+proptest! {
+    #[test]
+    fn prop_human_bytes_never_panics(bytes in any::<i64>()) {
+        let result = human_bytes(bytes);
+        assert!(!result.is_empty());
+        assert!(result.ends_with(" B") || result.ends_with(" KB") || result.ends_with(" MB") || result.ends_with(" GB") || result.ends_with(" TB") || result.ends_with(" PB"));
+    }
+
+    #[test]
+    fn prop_human_speed_never_panics(bytes_per_sec in any::<i64>()) {
+        let result = human_speed(bytes_per_sec);
+        assert!(!result.is_empty());
+        assert!(result.ends_with("B/s"));
+    }
+
+    #[test]
+    fn prop_human_eta_never_panics(seconds in any::<i64>()) {
+        let result = human_eta(seconds);
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn prop_progress_bar_valid_width(fraction in 0.0..=1.0f64, width in 0..1000usize) {
+        let result = progress_bar(fraction, width);
+        assert_eq!(result.chars().count(), width);
+    }
+}
