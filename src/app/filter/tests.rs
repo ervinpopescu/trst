@@ -268,3 +268,32 @@ fn test_sort_column_index() {
     assert_eq!(SortColumn::Ratio.column_index(), Some(7));
     assert_eq!(SortColumn::Queue.column_index(), None);
 }
+
+use proptest::prelude::*;
+
+proptest! {
+    #[test]
+    fn prop_filtering_maintains_bounds(
+        torrents in prop::collection::vec(
+            any::<u8>().prop_map(|_| Torrent::default()),
+            0..100
+        ),
+        filter_str in ".*"
+    ) {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.torrents = torrents;
+        app.filter_input = filter_str;
+        app.rebuild_filter();
+
+        let filtered = app.filtered_torrents();
+        assert!(filtered.len() <= app.torrents.len());
+
+        // Ensure all filtered indices are valid
+        for idx in &app.filtered_indices {
+            assert!(*idx < app.torrents.len());
+        }
+    }
+}

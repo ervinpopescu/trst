@@ -183,3 +183,12 @@ fn default_selection_and_queue_bindings_do_not_conflict() {
             .matches(bindings.queue_down.code, bindings.queue_down.modifiers)
     );
 }
+
+use proptest::prelude::*;
+
+proptest! {
+    #[test]
+    fn prop_parse_color_does_not_panic(s in ".*") {
+        let _ = parse_color(&s);
+    }
+}

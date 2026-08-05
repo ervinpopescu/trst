@@ -251,3 +251,23 @@ fn test_set_sequential_rpc_key() {
         "camelCase key must not appear in torrent-set args"
     );
 }
+
+use proptest::prelude::*;
+
+proptest! {
+    #[test]
+    fn prop_status_str_covers_all_values(status in 0..1000i64) {
+        let mut t = Torrent::default();
+        t.status = status;
+        let s = t.status_str();
+        assert!(!s.is_empty());
+
+        // Stopped is 0, any other value is not stopped
+        if status == 0 {
+            assert!(t.is_stopped());
+            assert_eq!(s, "Stopped");
+        } else {
+            assert!(!t.is_stopped());
+        }
+    }
+}

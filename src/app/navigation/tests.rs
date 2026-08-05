@@ -209,3 +209,64 @@ fn test_clamp_file_cursor_with_files() {
     app.clamp_file_cursor();
     assert_eq!(app.file_cursor, 1);
 }
+
+use proptest::prelude::*;
+
+proptest! {
+    #[test]
+    fn prop_clamp_cursor_never_out_of_bounds(
+        num_torrents in 0..1000usize,
+        initial_cursor in 0..2000usize
+    ) {
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.torrents = vec![Torrent::default(); num_torrents];
+        app.rebuild_filter();
+        app.cursor = initial_cursor;
+        app.clamp_cursor();
+
+        if num_torrents == 0 {
+            assert_eq!(app.cursor, 0);
+        } else {
+            assert!(app.cursor < num_torrents);
+            if initial_cursor < num_torrents {
+                assert_eq!(app.cursor, initial_cursor);
+            } else {
+                assert_eq!(app.cursor, num_torrents - 1);
+            }
+        }
+    }
+}
+
+proptest! {
+    #[test]
+    fn prop_clamp_file_cursor_never_out_of_bounds(
+        num_files in 0..1000usize,
+        initial_cursor in 0..2000usize
+    ) {
+        use crate::protocol::TorrentFile;
+        let mut app = App::new(
+            TransmissionClient::new("http://dummy", None, None),
+            Config::default(),
+        );
+        app.detail_torrent = Some(Torrent {
+            files: vec![TorrentFile::default(); num_files],
+            ..Default::default()
+        });
+        app.file_cursor = initial_cursor;
+        app.clamp_file_cursor();
+
+        if num_files == 0 {
+            assert_eq!(app.file_cursor, 0);
+        } else {
+            assert!(app.file_cursor < num_files);
+            if initial_cursor < num_files {
+                assert_eq!(app.file_cursor, initial_cursor);
+            } else {
+                assert_eq!(app.file_cursor, num_files - 1);
+            }
+        }
+    }
+}

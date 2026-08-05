@@ -157,3 +157,21 @@ fn test_format_trackers_multiple() {
         "a.example.com (S:1 L:0), b.example.com (S:2 L:1)"
     );
 }
+
+use proptest::prelude::*;
+
+proptest! {
+    #[test]
+    fn prop_format_timestamp_does_not_panic(ts in any::<i64>()) {
+        let result = format_timestamp(ts);
+        assert!(!result.is_empty());
+        if ts <= 0 {
+            assert_eq!(result, "—");
+        }
+    }
+
+    #[test]
+    fn prop_days_to_ymd_does_not_panic(days in any::<i64>()) {
+        let _ = days_to_ymd(days);
+    }
+}

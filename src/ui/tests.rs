@@ -55,9 +55,9 @@ fn emoji_longer_than_max_no_panic() {
 
 #[test]
 fn max_len_three_or_fewer_returns_input_as_is() {
-    // max_len <= 3 should never truncate (guard condition)
-    assert_eq!(truncate_input("abcdef", 3), "abcdef");
-    assert_eq!(truncate_input("abcdef", 1), "abcdef");
+    // max_len <= 3 should truncate without ...
+    assert_eq!(truncate_input("abcdef", 3), "abc");
+    assert_eq!(truncate_input("abcdef", 1), "a");
 }
 
 use crate::app::{App, Confirm, Modal};
@@ -164,7 +164,7 @@ fn test_draw_modal_add_url() {
 
 #[test]
 fn test_draw_modal_add_url_with_local_path_shows_suggestions() {
-    // Exercises the `if s.starts_with('/') …` branch in ui/mod.rs that calls
+    // Exercises the `if s.starts_with('/') ...` branch in ui/mod.rs that calls
     // `util::get_torrent_file_suggestions` and passes suggestions to `draw_input`.
     let dir = tempfile::tempdir().unwrap();
     std::fs::File::create(dir.path().join("ubuntu.torrent")).unwrap();
@@ -387,4 +387,19 @@ fn remote_suggestions_use_known_paths_before_local_fallback() {
         super::location_suggestions(&input, &app),
         [format!("{}/local-match", dir.path().display())]
     );
+}
+
+use proptest::prelude::*;
+
+proptest! {
+    #[test]
+    fn prop_truncate_input_never_panics(input in ".*", max_len in 0..1000usize) {
+        let result = crate::ui::truncate_input(&input, max_len);
+        assert!(result.chars().count() <= max_len);
+        if input.chars().count() <= max_len {
+            assert_eq!(result, input);
+        } else if max_len > 3 {
+            assert!(result.starts_with("..."));
+        }
+    }
 }

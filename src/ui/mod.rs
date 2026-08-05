@@ -160,12 +160,16 @@ fn draw_confirm(f: &mut Frame, confirm: Confirm, area: Rect) {
     draw_centered_popup(f, msg, area);
 }
 
-fn truncate_input(input: &str, max_len: usize) -> String {
+pub(crate) fn truncate_input(input: &str, max_len: usize) -> String {
     let char_count = input.chars().count();
-    if char_count > max_len && max_len > 3 {
-        let take = max_len - 3;
-        let tail: String = input.chars().skip(char_count - take).collect();
-        format!("...{tail}")
+    if char_count > max_len {
+        if max_len > 3 {
+            let take = max_len - 3;
+            let tail: String = input.chars().skip(char_count - take).collect();
+            format!("...{tail}")
+        } else {
+            input.chars().take(max_len).collect()
+        }
     } else {
         input.to_string()
     }
