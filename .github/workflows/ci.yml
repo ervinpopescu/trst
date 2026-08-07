@@ -12,6 +12,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  PROPTEST_DISABLE_FORKING: "1"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -38,7 +39,9 @@ jobs:
       - name: Run tests
         run: cargo test --all-features --verbose
       - name: Coverage
-        run: cargo llvm-cov --all-features --lcov --output-path lcov.info --ignore-filename-regex "src/test_support.rs" --fail-under-lines 95
+        run: |
+          cargo llvm-cov --tests --all-features --lcov --output-path lcov.info --ignore-filename-regex "src/test_support.rs"
+          cargo llvm-cov report --ignore-filename-regex "src/test_support.rs" --fail-under-lines 95
       - name: Upload to Codecov
         uses: codecov/codecov-action@04b047e8bb82a0c002c8312c1c880fbc6a999d45 # v5
         with:
