@@ -11,6 +11,7 @@
 | `src/client.rs` | `TransmissionClient`: thin wrapper around the Transmission RPC over HTTP |
 | `src/protocol.rs` | Serde structs for the Transmission JSON-RPC protocol |
 | `src/config.rs` | TOML config loading/saving, keybind parsing, theme |
+| `src/events.rs` | Event processing, automation rules, actions, and lifecycle tracking |
 | `src/credentials.rs` | Keyring backend with config-file fallback |
 | `src/util.rs` | Formatting helpers and filesystem path-completion utilities |
 | `src/ui/` | Ratatui rendering — one module per view plus a `mod.rs` router |

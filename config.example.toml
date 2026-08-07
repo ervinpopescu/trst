@@ -1,0 +1,37 @@
+# Example configuration for trst
+# By default, trst creates an empty config at ~/.config/trst/config.toml
+# You can copy sections from this file to customize behavior.
+
+[connection]
+url = "http://localhost:9091/transmission/rpc"
+# username = "admin"
+# password = "secret_password"
+
+[events]
+# The Events system lets you automate tasks when torrents reach certain states.
+# Available hooks: on_torrent_added, on_download_started, on_download_finished
+
+# Example: Automatically prioritize the first 5 alphabetical files in all torrents
+[[events.on_download_started]]
+actions = [
+    { action = "prioritize_files", first_alphabetical = 5, priority = "high" }
+]
+
+# Example: Sequential download for media files and execute a post-processing script when done
+[[events.on_download_finished]]
+# Matchers let you filter which torrents trigger these actions
+require_labels = ["movies"]
+# name_pattern = '(?i).*1080p.*'
+# require_tracker = "tracker.example.com"
+actions = [
+    { action = "execute", command = "/home/user/.local/bin/organize_media.py", args = ["{dir}/{name}"] },
+    { action = "remove", delete_local_data = false }
+]
+
+# Example: Automatically label torrents based on tracker and skip txt files
+[[events.on_torrent_added]]
+require_tracker = "anime-tracker.org"
+actions = [
+    { action = "set_labels", labels = ["anime"] },
+    { action = "prioritize_files", pattern = '(?i).*\.txt$', priority = "skip" }
+]

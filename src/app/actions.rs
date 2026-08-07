@@ -4,14 +4,12 @@ use crate::util;
 use std::time::{Duration, Instant};
 
 impl App {
-    /// Tab-completes a location input, using SSH for remote daemons and the local
-    /// filesystem for local ones.  Results are cached by parent directory so that
-    /// repeated Tab presses in the same directory don't re-run SSH.
+    /// Tab-completes a location input, using SSH for remote daemons and the local filesystem for local ones.
+    /// Results are cached by parent directory so that repeated Tab presses in the same directory don't re-run SSH.
     ///
     /// In both cases, known torrent download directories are used as a fallback
-    /// when neither SSH nor the local filesystem produces a completion — this
-    /// ensures Tab is useful even with an empty input or after an SSH failure.
-    pub(crate) fn complete_location(&mut self, input: &str) -> Option<String> {
+    /// when neither SSH nor the local filesystem produces a completion.
+    pub fn complete_location(&mut self, input: &str) -> Option<String> {
         // Pre-collect known torrent dirs for the fallback; used in both branches.
         let known_dirs: Vec<String> = {
             let mut seen = std::collections::HashSet::new();
@@ -74,7 +72,7 @@ impl App {
         }
     }
 
-    pub(crate) fn tick_autoclear(&mut self) {
+    pub fn tick_autoclear(&mut self) {
         if self
             .error_since
             .map(|t| t.elapsed() >= Duration::from_secs(10))
@@ -85,7 +83,7 @@ impl App {
         }
     }
 
-    pub(crate) fn set_error(&mut self, e: impl Into<String>) {
+    pub fn set_error(&mut self, e: impl Into<String>) {
         let e = e.into();
         if e == "HTTP 401 Unauthorized" && !matches!(self.modal, Some(Modal::Auth { .. })) {
             self.modal = Some(Modal::Auth {
@@ -99,7 +97,7 @@ impl App {
         }
     }
 
-    pub(crate) fn adjust_file_priority(&mut self, increase: bool) {
+    pub fn adjust_file_priority(&mut self, increase: bool) {
         let Some(torrent) = &self.detail_torrent else {
             return;
         };
@@ -132,7 +130,7 @@ impl App {
         self.refresh_detail();
     }
 
-    pub(crate) fn toggle_file_wanted(&mut self) {
+    pub fn toggle_file_wanted(&mut self) {
         let Some(torrent) = &self.detail_torrent else {
             return;
         };
@@ -165,7 +163,7 @@ impl App {
         self.refresh_detail();
     }
 
-    pub(crate) fn delete_files_from_disk(&mut self) {
+    pub fn delete_files_from_disk(&mut self) {
         if !self.is_local_daemon() {
             self.last_error = Some("delete from disk is only supported for local daemons".into());
             return;

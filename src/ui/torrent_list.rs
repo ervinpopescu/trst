@@ -4,7 +4,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Block, Borders, Row, Table};
 
-use crate::app::App;
+use crate::app::*;
 use crate::config::parse_color;
 use crate::util;
 

@@ -2,6 +2,7 @@ mod app;
 mod client;
 mod config;
 mod credentials;
+pub mod events;
 mod protocol;
 #[cfg(feature = "rsync")]
 mod rsync;
@@ -248,7 +249,13 @@ fn main() -> std::io::Result<()> {
         auth.as_ref().map(|(u, p)| (u.as_str(), p.as_str())),
         config.connection.timeout,
     );
-    let app = app::App::new(client, config).with_pending_url_save(pending_url);
+    let app = match app::App::try_new(client, config) {
+        Ok(app) => app.with_pending_url_save(pending_url),
+        Err(err) => {
+            eprintln!("error: {err}");
+            std::process::exit(1);
+        }
+    };
 
     let terminal = ratatui::init();
     let prev_hook = std::panic::take_hook();

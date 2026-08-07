@@ -1,7 +1,8 @@
 use super::*;
 
 impl App {
-    pub(crate) fn refresh_torrents(&mut self) {
+    /// Synchronously fetches and updates the list of torrents.
+    pub fn refresh_torrents(&mut self) {
         match self.client.get_torrents(TORRENT_LIST_FIELDS) {
             Ok(mut list) => {
                 self.sort_torrents(&mut list);
@@ -15,7 +16,7 @@ impl App {
         }
     }
 
-    pub(crate) fn refresh_detail(&mut self) {
+    pub fn refresh_detail(&mut self) {
         let Some(tid) = self.detail_torrent.as_ref().map(|t| t.id) else {
             return;
         };
@@ -36,7 +37,7 @@ impl App {
 
     /// Spawn a background thread to refresh data for the current tick.
     /// No-ops if a refresh is already in flight.
-    pub(crate) fn trigger_refresh(&mut self) {
+    pub fn trigger_refresh(&mut self) {
         if self.refresh_in_flight {
             return;
         }
@@ -95,7 +96,7 @@ impl App {
     }
 
     /// Apply any pending results from the background refresh thread.
-    pub(crate) fn drain_results(&mut self) {
+    pub fn drain_results(&mut self) {
         while let Ok(msg) = self.refresh_rx.try_recv() {
             match msg {
                 RefreshMsg::Torrents(result) => match result {
@@ -111,6 +112,8 @@ impl App {
                             cfg.connection.url = Some(url);
                             cfg.save();
                         }
+                        let torrents = self.torrents.clone();
+                        self.process_event_snapshot(&torrents);
                     }
                     Err(e) => self.set_error(e),
                 },
@@ -124,6 +127,26 @@ impl App {
                         self.view = View::TorrentList;
                     }
                     Err(e) => self.set_error(e),
+                },
+                RefreshMsg::EventSnapshot(result) => {
+                    self.event_snapshot_in_flight = false;
+                    match result {
+                        Ok(torrents) => self.process_event_snapshot(&torrents),
+                        Err(e) => self.set_error(e),
+                    }
+                }
+                RefreshMsg::ActionComplete {
+                    torrent_id,
+                    kind: _,
+                    result,
+                } => match result {
+                    Ok(progress) => {
+                        self.event_scheduler.complete(torrent_id, true, progress);
+                        self.start_ready_event_actions();
+                    }
+                    Err(failure) => {
+                        self.event_scheduler.fail(torrent_id, failure);
+                    }
                 },
                 RefreshMsg::Stats {
                     stats,
@@ -146,8 +169,21 @@ impl App {
     }
 
     #[cfg(feature = "rsync")]
-    pub(crate) fn refresh_rsync(&mut self) {
+    pub fn refresh_rsync(&mut self) {
         self.rsync_state = crate::rsync::RsyncState::load();
+    }
+
+    pub fn trigger_event_snapshot(&mut self) {
+        if self.event_snapshot_in_flight {
+            return;
+        }
+        self.event_snapshot_in_flight = true;
+        let client = Arc::clone(&self.client);
+        let tx = self.refresh_tx.clone();
+        std::thread::spawn(move || {
+            let result = client.get_torrents(crate::protocol::TORRENT_LIST_FIELDS);
+            let _ = tx.send(crate::app::RefreshMsg::EventSnapshot(result));
+        });
     }
 }
 
