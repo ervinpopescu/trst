@@ -4,6 +4,7 @@ use super::*;
 fn test_human_bytes() {
     assert_eq!(human_bytes(0), "0 B");
     assert_eq!(human_bytes(500), "500 B");
+    assert_eq!(human_bytes(-500), "-500 B");
     assert_eq!(human_bytes(1024), "1 KB");
     assert_eq!(human_bytes(1025), "1 KB");
     assert_eq!(human_bytes(1024 * 1024), "1 MB");
@@ -11,6 +12,10 @@ fn test_human_bytes() {
     assert_eq!(human_bytes(1024 * 1024 * 1024), "1 GB");
     assert_eq!(human_bytes(1024 * 1024 * 1024 * 1024), "1 TB");
     assert_eq!(human_bytes(1024 * 1024 * 1024 * 1024 * 1024), "1.0 PB");
+    assert_eq!(
+        human_bytes(1024 * 1024 * 1024 * 1024 * 1024 * 2000),
+        "2000.0 PB"
+    );
 }
 
 #[test]
@@ -51,6 +56,25 @@ fn test_percent() {
 fn test_get_path_suggestions_empty_input() {
     let result = get_path_suggestions("");
     assert!(result.is_empty());
+}
+
+#[test]
+fn test_get_path_suggestions_nonexistent_directory() {
+    let result = get_path_suggestions("/nonexistent_dir_12345/sub");
+    assert!(result.is_empty());
+}
+
+#[test]
+fn test_get_torrent_file_suggestions_nonexistent_directory() {
+    let result = get_torrent_file_suggestions("/nonexistent_dir_12345/sub");
+    assert!(result.is_empty());
+}
+
+#[test]
+fn test_list_remote_dirs_fails_fast_on_invalid_host() {
+    // list_remote_dirs connects via SSH to an invalid host and should return an error
+    let result = list_remote_dirs("invalid_host_12345.local", "/dir");
+    assert!(result.is_err());
 }
 
 #[test]
@@ -545,4 +569,13 @@ proptest! {
         let result = progress_bar(fraction, width);
         assert_eq!(result.chars().count(), width);
     }
+}
+
+#[test]
+fn test_location_parent_dir_edge_cases() {
+    assert_eq!(location_parent_dir("foo"), "/");
+    assert_eq!(location_parent_dir("/a/b/c"), "/a/b/");
+    assert_eq!(location_parent_dir("/foo"), "/");
+    assert_eq!(location_parent_dir(""), "");
+    assert_eq!(location_parent_dir("/"), "/");
 }
