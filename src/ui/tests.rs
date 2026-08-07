@@ -60,7 +60,7 @@ fn max_len_three_or_fewer_returns_input_as_is() {
     assert_eq!(truncate_input("abcdef", 1), "a");
 }
 
-use crate::app::{App, Confirm, Modal};
+use crate::app::*;
 use crate::client::TransmissionClient;
 use crate::config::Config;
 use crate::protocol::{SessionStats, Torrent};
@@ -278,6 +278,99 @@ fn test_draw_with_torrents_in_list() {
     app.rebuild_filter();
     let mut term = make_terminal();
     term.draw(|f| super::draw(f, &app)).unwrap();
+}
+
+#[test]
+fn test_render_views_to_evidence() {
+    let mut app = make_app();
+    app.torrents = vec![
+        Torrent {
+            id: 1,
+            name: "ubuntu-24.04-desktop-amd64.iso".into(),
+            status: 4,                      // downloading
+            rate_download: 5 * 1024 * 1024, // 5 MB/s
+            rate_upload: 256 * 1024,        // 256 KB/s
+            percent_done: 0.685,
+            size_when_done: 4 * 1024 * 1024 * 1024,
+            left_until_done: 1280 * 1024 * 1024,
+            eta: 256,
+            download_dir: "/downloads".into(),
+            peers_sending_to_us: 12,
+            peers_getting_from_us: 4,
+            ..Default::default()
+        },
+        Torrent {
+            id: 2,
+            name: "rust-lang-book.epub".into(),
+            status: 6, // seeding
+            rate_download: 0,
+            rate_upload: 128 * 1024, // 128 KB/s
+            percent_done: 1.0,
+            size_when_done: 15 * 1024 * 1024,
+            left_until_done: 0,
+            eta: -1,
+            upload_ratio: 2.15,
+            download_dir: "/downloads".into(),
+            peers_sending_to_us: 0,
+            peers_getting_from_us: 8,
+            ..Default::default()
+        },
+    ];
+    app.rebuild_filter();
+    app.stats = Some(SessionStats {
+        torrent_count: 2,
+        download_speed: 5 * 1024 * 1024,
+        upload_speed: 384 * 1024,
+        ..Default::default()
+    });
+    app.free = Some(crate::protocol::FreeSpace {
+        size_bytes: 250 * 1024 * 1024 * 1024, // 250 GB
+        ..Default::default()
+    });
+
+    let evidence_dir = std::env::temp_dir().join("no-mistakes-evidence");
+    let _ = std::fs::create_dir_all(&evidence_dir);
+
+    let format_terminal_buffer = |terminal: &Terminal<TestBackend>| -> String {
+        let buffer = terminal.backend().buffer();
+        let mut result = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                let cell = &buffer[(x, y)];
+                result.push_str(cell.symbol());
+            }
+            result.push('\n');
+        }
+        result
+    };
+
+    // 1. Torrent List View
+    {
+        let mut term = Terminal::new(TestBackend::new(100, 20)).unwrap();
+        term.draw(|f| super::draw(f, &app)).unwrap();
+        let rendered = format_terminal_buffer(&term);
+        let _ = std::fs::write(evidence_dir.join("torrent_list_view.txt"), rendered);
+    }
+
+    // 2. Help View Overlay
+    {
+        let mut term = Terminal::new(TestBackend::new(100, 20)).unwrap();
+        app.help = Some(0);
+        term.draw(|f| super::draw(f, &app)).unwrap();
+        let rendered = format_terminal_buffer(&term);
+        let _ = std::fs::write(evidence_dir.join("help_view.txt"), rendered);
+        app.help = None;
+    }
+
+    // 3. Detail View
+    {
+        let mut term = Terminal::new(TestBackend::new(100, 20)).unwrap();
+        app.view = View::Details;
+        app.detail_torrent = Some(app.torrents[0].clone());
+        term.draw(|f| super::draw(f, &app)).unwrap();
+        let rendered = format_terminal_buffer(&term);
+        let _ = std::fs::write(evidence_dir.join("details_view.txt"), rendered);
+    }
 }
 
 fn app_with_url(url: &str) -> App {

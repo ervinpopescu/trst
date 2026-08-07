@@ -1,17 +1,43 @@
 use super::*;
+use crate::app::{AppNavigation, AppRefresh};
 use crate::protocol::FilePriority;
 use crate::util;
 use std::time::{Duration, Instant};
 
-impl App {
+/// Trait defining user actions, location completion, and file mutations on the application state.
+pub trait AppActions {
+    /// Tab-completes a location input, using SSH for remote daemons and the local filesystem for local ones.
+    /// Results are cached by parent directory so that repeated Tab presses in the same directory don't re-run SSH.
+    ///
+    /// In both cases, known torrent download directories are used as a fallback
+    /// when neither SSH nor the local filesystem produces a completion.
+    fn complete_location(&mut self, input: &str) -> Option<String>;
+
+    /// Clears any visible error message if the 10-second error display TTL has expired.
+    fn tick_autoclear(&mut self);
+
+    /// Sets the active error message and records the timestamp for auto-clearing, or opens auth modal on 401.
+    fn set_error(&mut self, e: impl Into<String>);
+
+    /// Adjusts priority (increase or decrease) for the selected or highlighted files in the active detail torrent.
+    fn adjust_file_priority(&mut self, increase: bool);
+
+    /// Toggles the wanted/unwanted download state for the selected or highlighted files in the active detail torrent.
+    fn toggle_file_wanted(&mut self);
+
+    /// Deletes the selected or highlighted files directly from disk (local daemon only).
+    fn delete_files_from_disk(&mut self);
+}
+
+impl AppActions for App {
     /// Tab-completes a location input, using SSH for remote daemons and the local
     /// filesystem for local ones.  Results are cached by parent directory so that
     /// repeated Tab presses in the same directory don't re-run SSH.
     ///
     /// In both cases, known torrent download directories are used as a fallback
-    /// when neither SSH nor the local filesystem produces a completion — this
+    /// when neither SSH nor the local filesystem produces a completion - this
     /// ensures Tab is useful even with an empty input or after an SSH failure.
-    pub(crate) fn complete_location(&mut self, input: &str) -> Option<String> {
+    fn complete_location(&mut self, input: &str) -> Option<String> {
         // Pre-collect known torrent dirs for the fallback; used in both branches.
         let known_dirs: Vec<String> = {
             let mut seen = std::collections::HashSet::new();
@@ -61,7 +87,7 @@ impl App {
             }
             None => {
                 // Fall back to torrent dirs only when the filesystem has no
-                // candidates at all — not merely when they share no common prefix.
+                // candidates at all - not merely when they share no common prefix.
                 let fs_matches = util::get_path_suggestions(input);
                 util::autocomplete_path(input).or_else(|| {
                     if fs_matches.is_empty() {
@@ -74,7 +100,7 @@ impl App {
         }
     }
 
-    pub(crate) fn tick_autoclear(&mut self) {
+    fn tick_autoclear(&mut self) {
         if self
             .error_since
             .map(|t| t.elapsed() >= Duration::from_secs(10))
@@ -85,7 +111,7 @@ impl App {
         }
     }
 
-    pub(crate) fn set_error(&mut self, e: impl Into<String>) {
+    fn set_error(&mut self, e: impl Into<String>) {
         let e = e.into();
         if e == "HTTP 401 Unauthorized" && !matches!(self.modal, Some(Modal::Auth { .. })) {
             self.modal = Some(Modal::Auth {
@@ -99,7 +125,7 @@ impl App {
         }
     }
 
-    pub(crate) fn adjust_file_priority(&mut self, increase: bool) {
+    fn adjust_file_priority(&mut self, increase: bool) {
         let Some(torrent) = &self.detail_torrent else {
             return;
         };
@@ -132,7 +158,7 @@ impl App {
         self.refresh_detail();
     }
 
-    pub(crate) fn toggle_file_wanted(&mut self) {
+    fn toggle_file_wanted(&mut self) {
         let Some(torrent) = &self.detail_torrent else {
             return;
         };
@@ -165,7 +191,7 @@ impl App {
         self.refresh_detail();
     }
 
-    pub(crate) fn delete_files_from_disk(&mut self) {
+    fn delete_files_from_disk(&mut self) {
         if !self.is_local_daemon() {
             self.last_error = Some("delete from disk is only supported for local daemons".into());
             return;

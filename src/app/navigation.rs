@@ -1,8 +1,29 @@
 use super::*;
 use std::collections::BTreeSet;
 
-impl App {
-    pub fn target_ids(&self) -> Vec<i64> {
+/// Trait defining cursor navigation, multi-selection management, and bounds clamping across TUI views.
+pub trait AppNavigation {
+    /// Returns the Transmission torrent IDs currently targeted by user selection or cursor position.
+    fn target_ids(&self) -> Vec<i64>;
+
+    /// Returns the file indices targeted by file selection or file cursor position.
+    fn file_target_indices(&self) -> Vec<usize>;
+
+    /// Clamps the main torrent cursor position within valid bounds of the filtered torrent list.
+    fn clamp_cursor(&mut self);
+
+    /// Clamps the file detail cursor position within valid bounds of the active detail torrent's files.
+    fn clamp_file_cursor(&mut self);
+
+    /// Moves the cursor down by one entry, updating selection bounds when multi-selecting.
+    fn move_down(cursor: &mut usize, selected: &mut BTreeSet<usize>, limit: usize, selecting: bool);
+
+    /// Moves the cursor up by one entry, updating selection bounds when multi-selecting.
+    fn move_up(cursor: &mut usize, selected: &mut BTreeSet<usize>, limit: usize, selecting: bool);
+}
+
+impl AppNavigation for App {
+    fn target_ids(&self) -> Vec<i64> {
         let visible = self.filtered_torrents();
         if self.selected.is_empty() {
             visible
@@ -17,7 +38,7 @@ impl App {
         }
     }
 
-    pub(crate) fn file_target_indices(&self) -> Vec<usize> {
+    fn file_target_indices(&self) -> Vec<usize> {
         if self.file_selected.is_empty() {
             vec![self.file_cursor]
         } else {
@@ -25,7 +46,7 @@ impl App {
         }
     }
 
-    pub(crate) fn clamp_cursor(&mut self) {
+    fn clamp_cursor(&mut self) {
         let len = self.filtered_torrents().len();
         if len == 0 {
             self.cursor = 0;
@@ -34,7 +55,7 @@ impl App {
         }
     }
 
-    pub(crate) fn clamp_file_cursor(&mut self) {
+    fn clamp_file_cursor(&mut self) {
         let len = self
             .detail_torrent
             .as_ref()
@@ -47,7 +68,7 @@ impl App {
         }
     }
 
-    pub(crate) fn move_down(
+    fn move_down(
         cursor: &mut usize,
         selected: &mut BTreeSet<usize>,
         limit: usize,
@@ -67,12 +88,7 @@ impl App {
         }
     }
 
-    pub(crate) fn move_up(
-        cursor: &mut usize,
-        selected: &mut BTreeSet<usize>,
-        limit: usize,
-        selecting: bool,
-    ) {
+    fn move_up(cursor: &mut usize, selected: &mut BTreeSet<usize>, limit: usize, selecting: bool) {
         if limit == 0 {
             return;
         }

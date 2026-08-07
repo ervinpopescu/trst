@@ -54,23 +54,29 @@ trst --url http://192.168.1.100:9091/transmission/rpc --username admin --passwor
 `trst` includes a standalone Python script, `organize_media.py`, designed for automated post-processing of torrents for Jellyfin.
 
 ### Features
+
 - **TMDB Integration:** Fetches canonical titles, years, and IDs for reliable matching.
 - **Strict Normalization:** Renames existing media folders to the `Title (Year) [tmdbid-XXX]` format.
 - **Jellyfin Compatible:** Automatically handles Movie and Series (Season/Episode) structures.
 - **Cleanup:** Automatically removes unneeded files (NFOs, samples) after processing.
 
 ### Setup with Transmission
+
 To use the script with Transmission:
+
 1. Ensure `requests` is installed (`pip install requests`).
 2. Set your TMDB API key. You can either:
    - Add the following to `~/.config/trst/config.toml`:
+
      ```toml
      [media]
      tmdb_api_key = "your_key_here"
      ```
+
    - Set the `TMDB_API_KEY` environment variable in your Transmission environment.
 3. Copy the script to a permanent location (e.g., `~/.local/bin/organize_media.py`).
 4. Update your Transmission `settings.json`:
+
    ```json
    "script-torrent-done-enabled": true,
    "script-torrent-done-filename": "/home/youruser/.local/bin/organize_media.py"
