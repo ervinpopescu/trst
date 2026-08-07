@@ -257,8 +257,10 @@ use proptest::prelude::*;
 proptest! {
     #[test]
     fn prop_status_str_covers_all_values(status in 0..1000i64) {
-        let mut t = Torrent::default();
-        t.status = status;
+        let t = Torrent {
+            status,
+            ..Torrent::default()
+        };
         let s = t.status_str();
         assert!(!s.is_empty());
 

@@ -78,6 +78,13 @@ fn test_parse_args_clear_auth_with_host() {
 }
 
 #[test]
+fn test_parse_args_flags_username_and_password() {
+    let a = parse_args_from(args(&["-n", "myuser", "-p", "mypass"]));
+    assert_eq!(a.username.as_deref(), Some("myuser"));
+    assert_eq!(a.password.as_deref(), Some("mypass"));
+}
+
+#[test]
 fn test_init_keyring_backend_makes_entry_usable() {
     // After backend initialisation, Entry::new must succeed on this platform.
     // This exercises the fallback path on CI/systems without a secret-service daemon.

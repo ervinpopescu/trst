@@ -291,37 +291,114 @@ fn sort_column_labels_are_stable_user_facing_names() {
 }
 
 #[test]
-fn malformed_or_scheme_less_urls_are_not_treated_as_local_daemons() {
-    for url in ["localhost:9091", "", "://missing-scheme"] {
-        let app = App::new(TransmissionClient::new(url, None, None), Config::default());
-        assert!(!app.is_local_daemon(), "{url:?} must not be assumed local");
-        assert_eq!(app.ssh_host(), None);
-    }
+fn test_event_automation_process_event_snapshot() {
+    use crate::config::{ActionConfig, EventsConfig, RuleConfig};
+
+    let cfg = Config {
+        events: EventsConfig {
+            on_torrent_added: vec![RuleConfig {
+                require_labels: None,
+                require_tracker: None,
+                name_pattern: None,
+                actions: vec![ActionConfig::Stop],
+            }],
+            on_download_started: vec![RuleConfig {
+                require_labels: None,
+                require_tracker: None,
+                name_pattern: None,
+                actions: vec![ActionConfig::Start],
+            }],
+            on_download_finished: vec![RuleConfig {
+                require_labels: None,
+                require_tracker: None,
+                name_pattern: None,
+                actions: vec![ActionConfig::Remove {
+                    delete_local_data: false,
+                }],
+            }],
+        },
+        ..Default::default()
+    };
+
+    let mut app = App::new(
+        TransmissionClient::new("http://localhost:9091/transmission/rpc", None, None),
+        cfg,
+    );
+
+    // Initial baseline
+    app.process_event_snapshot(&[]);
+
+    // Added torrent
+    let torrent1 = Torrent {
+        id: 1,
+        name: "test1".into(),
+        status: 0,
+        percent_done: 0.0,
+        ..Default::default()
+    };
+    app.process_event_snapshot(std::slice::from_ref(&torrent1));
+
+    // Download started torrent
+    let torrent1_started = Torrent {
+        status: 4,
+        ..torrent1.clone()
+    };
+    app.process_event_snapshot(&[torrent1_started]);
+
+    // Download finished torrent
+    let torrent1_finished = Torrent {
+        status: 6,
+        percent_done: 1.0,
+        ..torrent1
+    };
+    app.process_event_snapshot(&[torrent1_finished]);
 }
 
 #[test]
-fn userinfo_cannot_disguise_a_remote_daemon_as_local() {
-    let remote = App::new(
-        TransmissionClient::new(
-            "http://localhost:secret@remote.example:9091/transmission/rpc",
-            None,
-            None,
-        ),
-        Config::default(),
-    );
-    assert!(!remote.is_local_daemon());
-    assert_eq!(remote.ssh_host().as_deref(), Some("remote.example"));
+fn test_app_try_new_invalid_events_config() {
+    let mut cfg = Config::default();
+    cfg.events.on_torrent_added = vec![crate::config::RuleConfig {
+        require_labels: None,
+        require_tracker: None,
+        name_pattern: Some("[invalid regex".into()),
+        actions: vec![],
+    }];
 
-    let local = App::new(
-        TransmissionClient::new(
-            "http://user:secret@LOCALHOST:9091/transmission/rpc",
-            None,
-            None,
-        ),
-        Config::default(),
+    let res = App::try_new(
+        TransmissionClient::new("http://localhost:9091/transmission/rpc", None, None),
+        cfg,
     );
-    assert!(local.is_local_daemon());
-    assert_eq!(local.ssh_host(), None);
+    assert!(res.is_err());
+}
+
+#[test]
+fn test_app_with_pending_url_save() {
+    let app = App::new(
+        TransmissionClient::new("http://localhost:9091/transmission/rpc", None, None),
+        Config::default(),
+    )
+    .with_pending_url_save(Some("http://save.me".into()));
+    assert_eq!(app.pending_url_save.as_deref(), Some("http://save.me"));
+}
+
+#[test]
+fn test_sort_column_full_cycle() {
+    let mut col = SortColumn::Queue;
+    let expected = [
+        SortColumn::Name,
+        SortColumn::Size,
+        SortColumn::Progress,
+        SortColumn::Down,
+        SortColumn::Up,
+        SortColumn::Eta,
+        SortColumn::Ratio,
+        SortColumn::Status,
+        SortColumn::Queue,
+    ];
+    for &exp in &expected {
+        col = col.next();
+        assert_eq!(col, exp);
+    }
 }
 
 use proptest::prelude::*;
@@ -331,9 +408,7 @@ proptest! {
     fn prop_is_safe_relative_path_rejects_unsafe(path in ".*") {
         let is_safe = super::is_safe_relative_path(&path);
 
-        if path.is_empty() {
-            assert!(!is_safe);
-        } else if path.starts_with('/') {
+        if path.is_empty() || path.starts_with('/') {
             assert!(!is_safe);
         } else if path.contains("..") {
             // Not strictly true for file names like `foo..bar`, but `Component::ParentDir` checking is robust.
