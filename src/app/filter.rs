@@ -7,6 +7,12 @@ pub trait AppFilter {
     fn filtered_torrents(&self) -> Vec<&Torrent>;
 
     /// Rebuilds the list of filtered indices based on the active filter input text.
+    ///
+    /// Supports prefix filters:
+    /// - `"status:<name>"` - filters by status string (e.g. `downloading`, `seeding`, `stopped`)
+    /// - `"tracker:<host>"` - filters by tracker domain/announce URL
+    /// - `"label:<tag>"` - filters by label
+    /// - Plain text - filters by case-insensitive torrent name substring
     fn rebuild_filter(&mut self);
 
     /// Sorts a slice of torrents according to the active sort column and direction.

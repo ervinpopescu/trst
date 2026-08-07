@@ -11,6 +11,9 @@ pub trait AppRefresh {
     /// Spawns a background thread to fetch torrent list, detail, or stats for the current tick.
     fn trigger_refresh(&mut self);
 
+    /// Spawns a background thread to fetch a torrent list snapshot for event listening.
+    fn trigger_event_snapshot(&mut self);
+
     /// Drains and applies pending background messages from the refresh channel.
     fn drain_results(&mut self);
 
@@ -130,6 +133,8 @@ impl AppRefresh for App {
                             cfg.connection.url = Some(url);
                             cfg.save();
                         }
+                        let torrents = self.torrents.clone();
+                        self.process_event_snapshot(&torrents);
                     }
                     Err(e) => self.set_error(e),
                 },
@@ -143,6 +148,26 @@ impl AppRefresh for App {
                         self.view = View::TorrentList;
                     }
                     Err(e) => self.set_error(e),
+                },
+                RefreshMsg::EventSnapshot(result) => {
+                    self.event_snapshot_in_flight = false;
+                    match result {
+                        Ok(torrents) => self.process_event_snapshot(&torrents),
+                        Err(e) => self.set_error(e),
+                    }
+                }
+                RefreshMsg::ActionComplete {
+                    torrent_id,
+                    kind: _,
+                    result,
+                } => match result {
+                    Ok(progress) => {
+                        self.event_scheduler.complete(torrent_id, true, progress);
+                        self.start_ready_event_actions();
+                    }
+                    Err(failure) => {
+                        self.event_scheduler.fail(torrent_id, failure);
+                    }
                 },
                 RefreshMsg::Stats {
                     stats,
@@ -167,6 +192,19 @@ impl AppRefresh for App {
     #[cfg(feature = "rsync")]
     fn refresh_rsync(&mut self) {
         self.rsync_state = crate::rsync::RsyncState::load();
+    }
+
+    fn trigger_event_snapshot(&mut self) {
+        if self.event_snapshot_in_flight {
+            return;
+        }
+        self.event_snapshot_in_flight = true;
+        let client = Arc::clone(&self.client);
+        let tx = self.refresh_tx.clone();
+        std::thread::spawn(move || {
+            let result = client.get_torrents(crate::protocol::TORRENT_LIST_FIELDS);
+            let _ = tx.send(crate::app::RefreshMsg::EventSnapshot(result));
+        });
     }
 }
 

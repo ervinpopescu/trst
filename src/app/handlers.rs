@@ -42,6 +42,15 @@ impl AppHandlers for App {
     fn handle_tick(&mut self) {
         if self.help.is_none() && !matches!(self.modal, Some(Modal::Auth { .. })) {
             self.trigger_refresh();
+            let is_torrent_list = match self.view {
+                View::TorrentList => true,
+                #[cfg(feature = "rsync")]
+                View::Rsync => true,
+                _ => false,
+            };
+            if !is_torrent_list {
+                self.trigger_event_snapshot();
+            }
             #[cfg(feature = "rsync")]
             if self.view == View::Rsync {
                 self.refresh_rsync();
