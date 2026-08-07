@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use crate::protocol::*;
 
+/// HTTP client wrapper for Transmission JSON-RPC protocol over HTTP/HTTPS.
 pub struct TransmissionClient {
     agent: ureq::Agent,
     pub url: String,
@@ -13,6 +14,7 @@ pub struct TransmissionClient {
 }
 
 impl TransmissionClient {
+    /// Creates a new `TransmissionClient` targeting `url`, with optional HTTP Basic auth and connection timeout.
     pub fn new(url: &str, auth: Option<(&str, &str)>, timeout: Option<u64>) -> Self {
         let timeout = timeout.unwrap_or(10);
         let agent: ureq::Agent = ureq::Agent::config_builder()
@@ -36,6 +38,7 @@ impl TransmissionClient {
         }
     }
 
+    /// Sets or replaces the HTTP Basic authentication header credentials.
     pub fn set_auth(&self, username: &str, password: &str) {
         let encoded =
             base64::engine::general_purpose::STANDARD.encode(format!("{username}:{password}"));
@@ -101,6 +104,7 @@ impl TransmissionClient {
         Err("session ID negotiation failed".into())
     }
 
+    /// Fetches all torrents with the requested JSON-RPC fields.
     pub fn get_torrents(&self, fields: &[&str]) -> Result<Vec<Torrent>, String> {
         let args = json!({ "fields": fields });
         let mut resp = self.rpc("torrent-get", Some(args))?;
@@ -110,6 +114,7 @@ impl TransmissionClient {
         Ok(torrents)
     }
 
+    /// Fetches a single torrent by ID with the requested JSON-RPC fields.
     pub fn get_torrent(&self, id: i64, fields: &[&str]) -> Result<Option<Torrent>, String> {
         let args = json!({ "ids": [id], "fields": fields });
         let mut resp = self.rpc("torrent-get", Some(args))?;
@@ -125,22 +130,27 @@ impl TransmissionClient {
         Ok(())
     }
 
+    /// Starts downloading/seeding for the specified torrent IDs.
     pub fn start(&self, ids: &[i64]) -> Result<(), String> {
         self.torrent_action("torrent-start", ids)
     }
 
+    /// Stops downloading/seeding for the specified torrent IDs.
     pub fn stop(&self, ids: &[i64]) -> Result<(), String> {
         self.torrent_action("torrent-stop", ids)
     }
 
+    /// Triggers local piece verification for the specified torrent IDs.
     pub fn verify(&self, ids: &[i64]) -> Result<(), String> {
         self.torrent_action("torrent-verify", ids)
     }
 
+    /// Re-announces the specified torrent IDs to trackers.
     pub fn reannounce(&self, ids: &[i64]) -> Result<(), String> {
         self.torrent_action("torrent-reannounce", ids)
     }
 
+    /// Removes the specified torrent IDs, optionally deleting downloaded data files from disk.
     pub fn remove(&self, ids: &[i64], delete_local: bool) -> Result<(), String> {
         let args = json!({
             "ids": ids,
@@ -150,6 +160,7 @@ impl TransmissionClient {
         Ok(())
     }
 
+    /// Adds a torrent by magnet link, HTTP URL, or remote file path.
     pub fn add(&self, location: &str, download_dir: Option<&str>) -> Result<(), String> {
         let mut args = json!({ "filename": location });
         if let Some(dir) = download_dir
@@ -177,6 +188,7 @@ impl TransmissionClient {
         Ok(())
     }
 
+    /// Sets file priority levels and wanted/unwanted flags for files inside a torrent.
     pub fn set_file_priorities(
         &self,
         torrent_id: i64,
@@ -230,6 +242,7 @@ impl TransmissionClient {
         Ok(())
     }
 
+    /// Enables or disables sequential download mode for the specified torrent IDs.
     pub fn set_sequential(&self, ids: &[i64], sequential: bool) -> Result<(), String> {
         let args = json!({
             "ids": ids,
@@ -239,16 +252,19 @@ impl TransmissionClient {
         Ok(())
     }
 
+    /// Moves torrents up, down, to top, or to bottom in Transmission's download queue.
     pub fn queue_move(&self, method: &str, ids: &[i64]) -> Result<(), String> {
         self.torrent_action(method, ids)
     }
 
+    /// Sets labels on the specified torrent IDs.
     pub fn set_labels(&self, ids: &[i64], labels: &[String]) -> Result<(), String> {
         let args = serde_json::json!({ "ids": ids, "labels": labels });
         self.rpc("torrent-set", Some(args))?;
         Ok(())
     }
 
+    /// Changes the storage location for torrents, optionally moving downloaded files.
     pub fn set_location(
         &self,
         ids: &[i64],
@@ -267,11 +283,13 @@ impl TransmissionClient {
         Ok(())
     }
 
+    /// Fetches global session transfer statistics (download/upload speed, torrent counts).
     pub fn session_stats(&self) -> Result<SessionStats, String> {
         let resp = self.rpc("session-stats", None)?;
         serde_json::from_value(resp.arguments).map_err(|e: serde_json::Error| e.to_string())
     }
 
+    /// Queries remaining free space on the Transmission daemon storage filesystem at `path`.
     pub fn free_space(&self, path: &str) -> Result<FreeSpace, String> {
         let args = json!({ "path": path });
         let resp = self.rpc("free-space", Some(args))?;
