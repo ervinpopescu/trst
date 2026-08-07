@@ -1,7 +1,26 @@
 use super::*;
 
-impl App {
-    pub(crate) fn refresh_torrents(&mut self) {
+/// Trait for background data fetching and state synchronization with the Transmission daemon.
+pub trait AppRefresh {
+    /// Synchronously fetches and updates the list of torrents.
+    fn refresh_torrents(&mut self);
+
+    /// Synchronously fetches and updates details for the currently active detail torrent.
+    fn refresh_detail(&mut self);
+
+    /// Spawns a background thread to fetch torrent list, detail, or stats for the current tick.
+    fn trigger_refresh(&mut self);
+
+    /// Drains and applies pending background messages from the refresh channel.
+    fn drain_results(&mut self);
+
+    /// Reloads rsync state files when the rsync view is active.
+    #[cfg(feature = "rsync")]
+    fn refresh_rsync(&mut self);
+}
+
+impl AppRefresh for App {
+    fn refresh_torrents(&mut self) {
         match self.client.get_torrents(TORRENT_LIST_FIELDS) {
             Ok(mut list) => {
                 self.sort_torrents(&mut list);
@@ -15,7 +34,7 @@ impl App {
         }
     }
 
-    pub(crate) fn refresh_detail(&mut self) {
+    fn refresh_detail(&mut self) {
         let Some(tid) = self.detail_torrent.as_ref().map(|t| t.id) else {
             return;
         };
@@ -36,7 +55,7 @@ impl App {
 
     /// Spawn a background thread to refresh data for the current tick.
     /// No-ops if a refresh is already in flight.
-    pub(crate) fn trigger_refresh(&mut self) {
+    fn trigger_refresh(&mut self) {
         if self.refresh_in_flight {
             return;
         }
@@ -95,7 +114,7 @@ impl App {
     }
 
     /// Apply any pending results from the background refresh thread.
-    pub(crate) fn drain_results(&mut self) {
+    fn drain_results(&mut self) {
         while let Ok(msg) = self.refresh_rx.try_recv() {
             match msg {
                 RefreshMsg::Torrents(result) => match result {
@@ -146,7 +165,7 @@ impl App {
     }
 
     #[cfg(feature = "rsync")]
-    pub(crate) fn refresh_rsync(&mut self) {
+    fn refresh_rsync(&mut self) {
         self.rsync_state = crate::rsync::RsyncState::load();
     }
 }

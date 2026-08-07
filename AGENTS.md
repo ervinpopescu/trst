@@ -7,18 +7,19 @@
 | File | Role |
 |------|------|
 | `src/main.rs` | Argument parsing, config loading, client construction, App launch |
-| `src/app.rs` | `App` struct: state machine, key handling, background refresh loop |
+| `src/app.rs` | `App` struct definition, entrypoint, and central state machine |
+| `src/app/` | Domain-specific operations refactored into traits (actions, filter, handlers, navigation, refresh) |
 | `src/client.rs` | `TransmissionClient`: thin wrapper around the Transmission RPC over HTTP |
 | `src/protocol.rs` | Serde structs for the Transmission JSON-RPC protocol |
 | `src/config.rs` | TOML config loading/saving, keybind parsing, theme |
 | `src/credentials.rs` | Keyring backend with config-file fallback |
 | `src/util.rs` | Formatting helpers and filesystem path-completion utilities |
-| `src/ui/` | Ratatui rendering — one module per view plus a `mod.rs` router |
+| `src/ui/` | Ratatui rendering - one module per view plus a `mod.rs` router |
 
 ## Key Conventions
 
-- Feature additions go through the `Modal` enum in `app.rs` for overlays, or new `View` variants for full-screen panels.
-- Client methods call `self.rpc(method, args)` and return `Result<_, String>`. Error strings are surfaced via `App::set_error`.
+- Feature additions go through the `Modal` enum in `app.rs` for overlays, or new `View` variants for full-screen panels. The `App` struct's behavior is divided into domain traits under `src/app/` (`AppActions`, `AppFilter`, `AppHandlers`, `AppNavigation`, `AppRefresh`).
+- Client methods call `self.rpc(method, args)` and return `Result<_, String>`. Error strings are surfaced via `AppActions::set_error` on the state machine.
 - Background data refreshes use the `RefreshMsg` channel; avoid blocking the main event loop.
 - Path-completion helpers live in `util.rs`: `get_path_suggestions` / `autocomplete_path` for directory-only completion; `get_torrent_file_suggestions` / `autocomplete_torrent_path` for paths that include `.torrent` files.
 - When adding a torrent from a local `.torrent` file, read the bytes client-side and call `client.add_metainfo(&bytes, dir)` (sends base64 `metainfo`). For magnet links and HTTP URLs, call `client.add(url, dir)` (sends `filename`).

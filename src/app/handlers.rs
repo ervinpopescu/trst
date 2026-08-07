@@ -1,8 +1,45 @@
 use super::*;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-impl App {
-    pub(crate) fn handle_tick(&mut self) {
+/// Trait for handling keyboard events, periodic ticks, and modal inputs across TUI views.
+pub trait AppHandlers {
+    /// Handles top-level key events, routing to active modals, views, or global shortcuts.
+    fn handle_key(&mut self, key: KeyEvent);
+
+    /// Handles periodic timer tick events, triggering refresh threads and error timeouts.
+    fn handle_tick(&mut self);
+
+    /// Handles keyboard events when viewing the main torrent list.
+    fn handle_torrent_list_key(&mut self, key: KeyEvent);
+
+    /// Handles keyboard events when viewing torrent file details.
+    fn handle_files_key(&mut self, key: KeyEvent);
+
+    /// Handles keyboard events when viewing torrent general details.
+    fn handle_details_key(&mut self, key: KeyEvent);
+
+    /// Handles keyboard events when viewing the help overlay.
+    fn handle_help_key(&mut self, key: KeyEvent);
+
+    /// Handles keyboard events for URL, location, and path inputs in modals.
+    fn handle_add_input(&mut self, key: KeyEvent);
+
+    /// Handles keyboard events when typing filter text in the filter modal.
+    fn handle_filter_input(&mut self, key: KeyEvent);
+
+    /// Handles keyboard events when typing credentials in the authentication modal.
+    fn handle_auth_input(&mut self, key: KeyEvent);
+
+    /// Handles submit/completion for editing torrent labels.
+    fn handle_label_input(&mut self);
+
+    /// Handles keyboard events when viewing the rsync panel.
+    #[cfg(feature = "rsync")]
+    fn handle_rsync_key(&mut self, key: KeyEvent);
+}
+
+impl AppHandlers for App {
+    fn handle_tick(&mut self) {
         if self.help.is_none() && !matches!(self.modal, Some(Modal::Auth { .. })) {
             self.trigger_refresh();
             #[cfg(feature = "rsync")]
@@ -14,7 +51,7 @@ impl App {
     }
 
     #[cfg(feature = "rsync")]
-    pub(crate) fn handle_rsync_key(&mut self, key: KeyEvent) {
+    fn handle_rsync_key(&mut self, key: KeyEvent) {
         let (code, mods) = (key.code, key.modifiers);
         let b = &self.bindings;
         if b.back.matches(code, mods) || b.quit.matches(code, mods) || code == KeyCode::Esc {
@@ -24,7 +61,7 @@ impl App {
         }
     }
 
-    pub(crate) fn handle_torrent_list_key(&mut self, key: KeyEvent) {
+    fn handle_torrent_list_key(&mut self, key: KeyEvent) {
         match &self.modal {
             Some(Modal::Auth { .. }) => {
                 self.handle_auth_input(key);
@@ -275,7 +312,7 @@ impl App {
         }
     }
 
-    pub(crate) fn handle_filter_input(&mut self, key: KeyEvent) {
+    fn handle_filter_input(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Enter | KeyCode::Esc => {
                 self.modal = None;
@@ -294,7 +331,7 @@ impl App {
         }
     }
 
-    pub(crate) fn handle_add_input(&mut self, key: KeyEvent) {
+    fn handle_add_input(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Enter => match self.modal.take() {
                 Some(Modal::AddUrl(s)) => {
@@ -414,7 +451,7 @@ impl App {
         }
     }
 
-    pub(crate) fn handle_auth_input(&mut self, key: KeyEvent) {
+    fn handle_auth_input(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc => {
                 self.modal = None;
@@ -518,7 +555,7 @@ impl App {
         }
     }
 
-    pub(crate) fn handle_label_input(&mut self) {
+    fn handle_label_input(&mut self) {
         let ids = self.target_ids();
         if !ids.is_empty() {
             let labels: Vec<String> = self
@@ -537,7 +574,7 @@ impl App {
         self.label_input.clear();
     }
 
-    pub(crate) fn handle_files_key(&mut self, key: KeyEvent) {
+    fn handle_files_key(&mut self, key: KeyEvent) {
         if matches!(
             self.modal,
             Some(Modal::Confirm(Confirm::DeleteFileFromDisk))
@@ -615,7 +652,7 @@ impl App {
         }
     }
 
-    pub(crate) fn handle_details_key(&mut self, key: KeyEvent) {
+    fn handle_details_key(&mut self, key: KeyEvent) {
         let (code, mods) = (key.code, key.modifiers);
         let b = &self.bindings;
 
@@ -635,7 +672,7 @@ impl App {
         }
     }
 
-    pub(crate) fn handle_help_key(&mut self, key: KeyEvent) {
+    fn handle_help_key(&mut self, key: KeyEvent) {
         let (code, mods) = (key.code, key.modifiers);
         let b = &self.bindings;
         let close = b.quit.matches(code, mods)
@@ -663,7 +700,7 @@ impl App {
         }
     }
 
-    pub(crate) fn handle_key(&mut self, key: KeyEvent) {
+    fn handle_key(&mut self, key: KeyEvent) {
         if self.help.is_some() {
             self.handle_help_key(key);
             return;

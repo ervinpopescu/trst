@@ -1,15 +1,27 @@
 use super::*;
 use crate::protocol::Torrent;
 
-impl App {
-    pub fn filtered_torrents(&self) -> Vec<&Torrent> {
+/// Trait for filtering and sorting torrent lists in the application view.
+pub trait AppFilter {
+    /// Returns references to the torrents currently visible under active filter criteria.
+    fn filtered_torrents(&self) -> Vec<&Torrent>;
+
+    /// Rebuilds the list of filtered indices based on the active filter input text.
+    fn rebuild_filter(&mut self);
+
+    /// Sorts a slice of torrents according to the active sort column and direction.
+    fn sort_torrents(&self, list: &mut [Torrent]);
+}
+
+impl AppFilter for App {
+    fn filtered_torrents(&self) -> Vec<&Torrent> {
         self.filtered_indices
             .iter()
             .filter_map(|&i| self.torrents.get(i))
             .collect()
     }
 
-    pub fn rebuild_filter(&mut self) {
+    fn rebuild_filter(&mut self) {
         let raw = self.filter_input.trim().to_lowercase();
         self.filtered_indices = if raw.is_empty() {
             (0..self.torrents.len()).collect()
@@ -52,7 +64,7 @@ impl App {
         };
     }
 
-    pub(crate) fn sort_torrents(&self, list: &mut [Torrent]) {
+    fn sort_torrents(&self, list: &mut [Torrent]) {
         let asc = self.sort_ascending;
         if self.sort_column == SortColumn::Name {
             list.sort_by_cached_key(|t| t.name.to_lowercase());
