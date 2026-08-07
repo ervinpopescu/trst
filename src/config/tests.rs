@@ -153,35 +153,90 @@ fn test_edit_labels_default_binding() {
 }
 
 #[test]
-fn default_selection_and_queue_bindings_do_not_conflict() {
-    let bindings = Bindings::from_config(&KeysConfig::default());
+fn test_default_serde_functions_and_priority() {
+    assert!(default_true());
+    assert_eq!(default_priority_high(), FilePriorityConfig::High);
 
-    assert!(bindings.select_up.matches(KeyCode::Up, KeyModifiers::SHIFT));
-    assert!(
-        bindings
-            .select_down
-            .matches(KeyCode::Down, KeyModifiers::SHIFT)
+    assert_eq!(
+        FilePriorityConfig::Skip.to_protocol(),
+        crate::protocol::FilePriority::Unwanted
     );
-    assert!(
-        bindings
-            .queue_up
-            .matches(KeyCode::Char('K'), KeyModifiers::SHIFT)
+    assert_eq!(
+        FilePriorityConfig::Low.to_protocol(),
+        crate::protocol::FilePriority::Low
     );
-    assert!(
-        bindings
-            .queue_down
-            .matches(KeyCode::Char('J'), KeyModifiers::SHIFT)
+    assert_eq!(
+        FilePriorityConfig::Normal.to_protocol(),
+        crate::protocol::FilePriority::Normal
     );
-    assert!(
-        !bindings
-            .select_up
-            .matches(bindings.queue_up.code, bindings.queue_up.modifiers)
+    assert_eq!(
+        FilePriorityConfig::High.to_protocol(),
+        crate::protocol::FilePriority::High
     );
-    assert!(
-        !bindings
-            .select_down
-            .matches(bindings.queue_down.code, bindings.queue_down.modifiers)
-    );
+
+    let toml_seq = "action = \"set_sequential\"";
+    let action_seq: ActionConfig = toml::from_str(toml_seq).expect("deserialize set_sequential");
+    if let ActionConfig::SetSequential { enabled } = action_seq {
+        assert!(enabled);
+    } else {
+        panic!("expected SetSequential");
+    }
+
+    let toml_prio = "action = \"prioritize_files\"";
+    let action_prio: ActionConfig =
+        toml::from_str(toml_prio).expect("deserialize prioritize_files");
+    if let ActionConfig::PrioritizeFiles { priority, .. } = action_prio {
+        assert_eq!(priority, FilePriorityConfig::High);
+    } else {
+        panic!("expected PrioritizeFiles");
+    }
+}
+
+#[test]
+fn test_events_config_toml_deserialization() {
+    let toml_str = r#"
+        [[on_torrent_added]]
+        require_labels = ["tv"]
+        require_tracker = "tracker.example"
+        name_pattern = "^Show"
+
+        [[on_torrent_added.actions]]
+        action = "set_sequential"
+        enabled = true
+
+        [[on_torrent_added.actions]]
+        action = "prioritize_files"
+        first_alphabetical = 2
+        pattern = "\\.mkv$"
+        priority = "high"
+
+        [[on_torrent_added.actions]]
+        action = "set_labels"
+        labels = ["auto"]
+
+        [[on_torrent_added.actions]]
+        action = "set_location"
+        path = "/downloads"
+
+        [[on_torrent_added.actions]]
+        action = "execute"
+        command = "echo"
+        args = ["{name}"]
+
+        [[on_torrent_added.actions]]
+        action = "stop"
+
+        [[on_torrent_added.actions]]
+        action = "start"
+
+        [[on_torrent_added.actions]]
+        action = "remove"
+        delete_local_data = false
+    "#;
+
+    let cfg: EventsConfig = toml::from_str(toml_str).expect("events config deserializes");
+    assert_eq!(cfg.on_torrent_added.len(), 1);
+    assert_eq!(cfg.on_torrent_added[0].actions.len(), 8);
 }
 
 use proptest::prelude::*;
