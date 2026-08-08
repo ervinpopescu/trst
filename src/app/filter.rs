@@ -2,6 +2,7 @@ use super::*;
 use crate::protocol::Torrent;
 
 impl App {
+    /// Returns references to the torrents currently visible under active filter criteria.
     pub fn filtered_torrents(&self) -> Vec<&Torrent> {
         self.filtered_indices
             .iter()
@@ -9,6 +10,13 @@ impl App {
             .collect()
     }
 
+    /// Rebuilds the list of filtered indices based on the active filter input text.
+    ///
+    /// Supports prefix filters:
+    /// - `"status:<name>"` — filters by status string (e.g. `downloading`, `seeding`, `stopped`)
+    /// - `"tracker:<host>"` — filters by tracker domain/announce URL
+    /// - `"label:<tag>"` — filters by label
+    /// - Plain text — filters by case-insensitive torrent name substring
     pub fn rebuild_filter(&mut self) {
         let raw = self.filter_input.trim().to_lowercase();
         self.filtered_indices = if raw.is_empty() {
@@ -52,7 +60,7 @@ impl App {
         };
     }
 
-    pub(crate) fn sort_torrents(&self, list: &mut [Torrent]) {
+    pub fn sort_torrents(&self, list: &mut [Torrent]) {
         let asc = self.sort_ascending;
         if self.sort_column == SortColumn::Name {
             list.sort_by_cached_key(|t| t.name.to_lowercase());

@@ -100,7 +100,7 @@ proptest! {
         bits in 0..255u8
     ) {
         // Just verify it doesn't crash on any modifier combinations + chars
-        let mods = KeyModifiers::from_bits_truncate(bits.into());
+        let mods = KeyModifiers::from_bits_truncate(bits);
         let _ = format_bind(&KeyBind {
             code: KeyCode::Char(char_val),
             modifiers: mods,

@@ -5,11 +5,13 @@ use std::path::PathBuf;
 
 #[derive(Deserialize, Serialize, Default)]
 #[serde(default)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     pub connection: ConnectionConfig,
     pub media: MediaConfig,
     pub theme: ThemeConfig,
     pub keys: KeysConfig,
+    pub events: EventsConfig,
 }
 
 #[derive(Deserialize, Serialize, Default)]
@@ -202,7 +204,7 @@ pub fn parse_color(s: &str) -> Color {
         "light_cyan" | "lightcyan" => Color::LightCyan,
         "white" => Color::White,
         "reset" | "default" | "" => Color::Reset,
-        hex if hex.starts_with('#') && hex.len() == 7 => {
+        hex if hex.starts_with('#') && hex.is_ascii() && hex.len() == 7 => {
             let r = u8::from_str_radix(&hex[1..3], 16).unwrap_or(0);
             let g = u8::from_str_radix(&hex[3..5], 16).unwrap_or(0);
             let b = u8::from_str_radix(&hex[5..7], 16).unwrap_or(0);
@@ -465,3 +467,85 @@ impl Bindings {
 
 #[cfg(test)]
 mod tests;
+
+#[derive(Deserialize, Serialize, Default, Clone, Debug)]
+#[serde(default, deny_unknown_fields)]
+pub struct EventsConfig {
+    pub on_torrent_added: Vec<RuleConfig>,
+    pub on_download_started: Vec<RuleConfig>,
+    pub on_download_finished: Vec<RuleConfig>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Default, Debug)]
+#[serde(default, deny_unknown_fields)]
+pub struct RuleConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub require_labels: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub require_tracker: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name_pattern: Option<String>,
+
+    pub actions: Vec<ActionConfig>,
+}
+
+fn default_true() -> bool {
+    true
+}
+fn default_priority_high() -> FilePriorityConfig {
+    FilePriorityConfig::High
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ActionConfig {
+    SetSequential {
+        #[serde(default = "default_true")]
+        enabled: bool,
+    },
+    PrioritizeFiles {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        first_alphabetical: Option<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pattern: Option<String>, // regex string
+        #[serde(default = "default_priority_high")]
+        priority: FilePriorityConfig,
+    },
+    SetLabels {
+        labels: Vec<String>,
+    },
+    SetLocation {
+        path: String,
+    },
+    Execute {
+        command: String,
+        #[serde(default)]
+        args: Vec<String>,
+    },
+    Stop,
+    Start,
+    Remove {
+        #[serde(default)]
+        delete_local_data: bool,
+    },
+}
+
+#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum FilePriorityConfig {
+    Skip,
+    Low,
+    Normal,
+    High,
+}
+
+impl FilePriorityConfig {
+    pub fn to_protocol(self) -> crate::protocol::FilePriority {
+        match self {
+            Self::Skip => crate::protocol::FilePriority::Unwanted,
+            Self::Low => crate::protocol::FilePriority::Low,
+            Self::Normal => crate::protocol::FilePriority::Normal,
+            Self::High => crate::protocol::FilePriority::High,
+        }
+    }
+}

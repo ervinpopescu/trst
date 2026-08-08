@@ -500,3 +500,76 @@ fn background_rsync_view_refreshes_torrent_list() {
     assert_eq!(server.request().method(), "torrent-get");
     assert_eq!(server.request().method(), "session-stats");
 }
+
+#[test]
+fn test_trigger_event_snapshot_and_drain() {
+    let server = ScriptedServer::start(vec![success(
+        serde_json::json!({"torrents": [{"id": 5, "name": "EvTorrent", "status": 4, "percentDone": 0.5}]}),
+    )]);
+    let mut app = app_for_server(&server);
+
+    assert!(!app.event_snapshot_in_flight);
+    app.trigger_event_snapshot();
+    assert!(app.event_snapshot_in_flight);
+
+    // Calling again while in flight should be a no-op
+    app.trigger_event_snapshot();
+
+    // Wait for snapshot thread
+    let start = Instant::now();
+    while app.event_snapshot_in_flight && start.elapsed().as_secs() < 3 {
+        app.drain_results();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+
+    assert!(!app.event_snapshot_in_flight);
+}
+
+#[test]
+fn test_drain_results_event_snapshot_error() {
+    let mut app = make_app();
+    app.event_snapshot_in_flight = true;
+    app.refresh_tx
+        .send(RefreshMsg::EventSnapshot(Err("snapshot error".into())))
+        .unwrap();
+
+    app.drain_results();
+
+    assert!(!app.event_snapshot_in_flight);
+    assert_eq!(app.last_error.as_deref(), Some("snapshot error"));
+}
+
+#[test]
+fn test_drain_results_action_complete_ok_and_err() {
+    let mut app = make_app();
+
+    // Send Ok ActionComplete
+    app.refresh_tx
+        .send(RefreshMsg::ActionComplete {
+            torrent_id: 10,
+            kind: crate::events::LifecycleEventKind::Added,
+            result: Ok(crate::events::ActionProgress {
+                next_action: 1,
+                current_dir: None,
+                current_labels: None,
+            }),
+        })
+        .unwrap();
+
+    app.drain_results();
+
+    // Send Err ActionComplete
+    app.refresh_tx
+        .send(RefreshMsg::ActionComplete {
+            torrent_id: 20,
+            kind: crate::events::LifecycleEventKind::DownloadFinished,
+            result: Err(crate::events::ActionFailure {
+                progress: crate::events::ActionProgress::default(),
+                kind: crate::events::ActionFailureKind::Retryable,
+                error: "action failed".into(),
+            }),
+        })
+        .unwrap();
+
+    app.drain_results();
+}

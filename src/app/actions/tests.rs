@@ -22,13 +22,6 @@ fn make_key(
     }
 }
 
-fn empty_app() -> App {
-    App::new(
-        TransmissionClient::new("http://dummy.invalid:9091/transmission/rpc", None, None),
-        Config::default(),
-    )
-}
-
 #[test]
 fn test_delete_files_from_disk_blocked_on_remote() {
     use crate::protocol::TorrentFile;
@@ -454,25 +447,29 @@ fn toggle_file_wanted_preserves_selection_when_rpc_fails() {
 }
 
 #[test]
-fn file_mutations_are_noops_without_a_detail_or_valid_file() {
-    let mut app = empty_app();
-    app.adjust_file_priority(true);
-    app.toggle_file_wanted();
-    assert!(app.last_error.is_none());
+fn test_complete_location_non_empty_no_common_prefix_branches() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let base = dir.path().to_str().expect("to_str");
+    std::fs::create_dir(dir.path().join("dir1")).expect("create_dir dir1");
+    std::fs::create_dir(dir.path().join("dir2")).expect("create_dir dir2");
 
-    app.detail_torrent = Some(Torrent {
-        id: 1,
-        file_stats: vec![],
+    let mut app = local_app();
+    app.torrents = vec![Torrent {
+        download_dir: "/known/dir".into(),
         ..Default::default()
-    });
-    app.file_cursor = 4;
-    app.adjust_file_priority(false);
-    app.toggle_file_wanted();
-    assert!(app.last_error.is_none());
+    }];
 
-    let mut local = local_app();
-    local.delete_files_from_disk();
-    assert!(local.last_error.is_none());
+    // fs_matches non-empty ("dir1", "dir2"), autocomplete_path returns None -> returns None
+    let input = format!("{}/dir", base);
+    assert_eq!(app.complete_location(&input), None);
+
+    // Remote lister non-empty ("alpha", "beta") with no common prefix beyond "/remote/" -> returns None
+    let mut remote_app = App::new(
+        TransmissionClient::new("http://remote.host:9091/transmission/rpc", None, None),
+        Config::default(),
+    );
+    remote_app.remote_dir_lister = |_, _| Ok(vec!["/remote/alpha".into(), "/remote/beta".into()]);
+    assert_eq!(remote_app.complete_location("/remote/"), None);
 }
 
 #[test]

@@ -60,7 +60,7 @@ fn max_len_three_or_fewer_returns_input_as_is() {
     assert_eq!(truncate_input("abcdef", 1), "a");
 }
 
-use crate::app::{App, Confirm, Modal};
+use crate::app::*;
 use crate::client::TransmissionClient;
 use crate::config::Config;
 use crate::protocol::{SessionStats, Torrent};
