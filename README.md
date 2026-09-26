@@ -8,7 +8,7 @@
 - **Full Management:** Add (via Magnet/URL), pause, resume, reannounce, verify, remove, and delete torrents.
 - **Location Control:** Choose download locations when adding torrents, or move existing torrents to new directories.
 - **Path Auto-Completion:** Seamless directory path completion when selecting locations using the `Tab` key.
-- **Secure Authentication:** Built-in support for Basic Authentication with automatic, secure credential persistence via the OS keyring (integrates with Secret Service, macOS Keychain, and Windows Credential Manager).
+- **Secure Authentication:** Built-in support for Basic Authentication with credential persistence through the OS keyring when available (with a config-file fallback).
 - **Configurable UI:** Extensive theming and keybinding configuration via `~/.config/trst/config.toml`.
 - **Keyboard-Driven:** Ergonomic, vim-inspired default keybindings.
 
@@ -29,7 +29,19 @@ Simply run `trst` from your terminal. By default, it will attempt to connect to 
 trst --url http://192.168.1.100:9091/transmission/rpc --username admin --password secret
 ```
 
-*(Note: Credentials provided via the CLI are securely and automatically saved to your OS keyring for future runs).*
+*(Note: Credentials provided via the CLI are saved to the OS keyring when available, with a config-file fallback. The `--password` value is visible in process listings and shell history. Credentials entered in the authentication modal are saved only after a successful request.)*
+
+### CLI arguments
+
+`trst` accepts an optional positional `HOST[:PORT]` or full `URL`. A host without a port uses port `9091`; without a positional host or `--url`, the configured URL is used, falling back to the local default.
+
+| Option | Description |
+| --- | --- |
+| `-u`, `--url <URL>` | Full Transmission RPC URL; overrides the positional host |
+| `-n`, `--username <USER>` | Username for authentication |
+| `-p`, `--password <PASS>` | Password for authentication (prints a security warning) |
+| `--clear-auth` | Remove saved credentials for the resolved URL and exit |
+| `-h`, `--help` | Print command help |
 
 ### Keybindings
 
