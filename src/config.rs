@@ -45,7 +45,9 @@ impl Config {
             },
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 let cfg = Self::default();
-                cfg.save_to(path);
+                if let Err(e) = cfg.save_to(path) {
+                    eprintln!("warning: failed to create config {}: {e}", path.display());
+                }
                 cfg
             }
             Err(e) => {
@@ -55,37 +57,41 @@ impl Config {
         }
     }
 
-    pub fn save(&self) {
-        self.save_to(&config_path());
+    /// Saves the configuration to the default path, returning filesystem or
+    /// serialization errors to the caller.
+    pub fn save(&self) -> std::io::Result<()> {
+        self.save_to(&config_path())
     }
 
-    pub fn save_to(&self, path: &PathBuf) {
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+    /// Saves the configuration to `path`, returning filesystem or serialization
+    /// errors instead of silently discarding them.
+    pub fn save_to(&self, path: &PathBuf) -> std::io::Result<()> {
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            std::fs::create_dir_all(parent)?;
         }
-        if let Ok(toml) = toml::to_string_pretty(self) {
-            #[cfg(unix)]
-            {
-                use std::io::Write;
-                use std::os::unix::fs::OpenOptionsExt;
-                let dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
-                let tmp_path = dir.join(".config.toml.tmp");
-                if let Ok(mut f) = std::fs::OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .truncate(true)
-                    .mode(0o600)
-                    .open(&tmp_path)
-                {
-                    let _ = f.write_all(toml.as_bytes());
-                    let _ = std::fs::rename(&tmp_path, path);
-                }
-            }
-            #[cfg(not(unix))]
-            {
-                let _ = std::fs::write(&path, toml);
-            }
+        let toml = toml::to_string_pretty(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        #[cfg(unix)]
+        {
+            use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
+            let dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+            let tmp_path = dir.join(".config.toml.tmp");
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&tmp_path)?;
+            f.write_all(toml.as_bytes())?;
+            std::fs::rename(&tmp_path, path)?;
         }
+        #[cfg(not(unix))]
+        std::fs::write(path, toml)?;
+        Ok(())
     }
 }
 

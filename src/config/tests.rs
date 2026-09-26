@@ -54,6 +54,29 @@ fn test_load_from_missing_file_creates_file_with_defaults() -> Result<(), Box<dy
 }
 
 #[test]
+fn save_to_returns_filesystem_errors() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let parent_file = dir.path().join("not-a-directory");
+    std::fs::write(&parent_file, "file").expect("create parent file");
+    let path = parent_file.join("config.toml");
+
+    assert!(Config::default().save_to(&path).is_err());
+}
+
+#[test]
+fn missing_config_with_unwritable_parent_returns_defaults() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let parent_file = dir.path().join("not-a-directory");
+    std::fs::write(&parent_file, "file").expect("create parent file");
+    let missing_path = parent_file.join("config.toml");
+
+    let cfg = Config::load_from(&missing_path);
+
+    assert!(cfg.connection.url.is_none());
+    assert!(parent_file.is_file());
+}
+
+#[test]
 fn malformed_config_returns_defaults_without_overwriting_the_file()
 -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempfile::tempdir()?;

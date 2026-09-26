@@ -250,7 +250,7 @@ fn main() -> std::io::Result<()> {
         }
         config.connection.username = None;
         config.connection.password = None;
-        config.save();
+        config.save()?;
         return Ok(());
     }
 
@@ -262,7 +262,7 @@ fn main() -> std::io::Result<()> {
         credentials::load,
     );
     if config_changed {
-        config.save();
+        config.save()?;
     }
 
     if should_warn_insecure_auth(&url, auth.is_some()) {
