@@ -5,6 +5,7 @@ fn test_human_bytes() {
     assert_eq!(human_bytes(0), "0 B");
     assert_eq!(human_bytes(500), "500 B");
     assert_eq!(human_bytes(-500), "-500 B");
+    assert_eq!(human_bytes(-1536), "-1.5 KB");
     assert_eq!(human_bytes(1024), "1 KB");
     assert_eq!(human_bytes(1025), "1 KB");
     assert_eq!(human_bytes(1024 * 1024), "1 MB");
@@ -23,6 +24,7 @@ fn test_human_speed() {
     assert_eq!(human_speed(0), "0 B/s");
     assert_eq!(human_speed(1024), "1 KB/s");
     assert_eq!(human_speed(1536), "1.5 KB/s");
+    assert_eq!(human_speed(-1536), "-1.5 KB/s");
 }
 
 #[test]
