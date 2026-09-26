@@ -8,10 +8,14 @@ fn args(slice: &[&str]) -> impl Iterator<Item = String> {
         .into_iter()
 }
 
+fn parse_args(slice: &[&str]) -> Args {
+    parse_args_from(args(slice)).expect("valid test arguments")
+}
+
 /// No arguments → url is empty (main() will fall back to config / hardcoded default).
 #[test]
 fn test_parse_args_no_args_url_is_empty() {
-    let a = parse_args_from(args(&[]));
+    let a = parse_args(&[]);
     assert!(a.url.is_empty(), "url must be empty when no args are given");
     assert!(a.username.is_none());
     assert!(a.password.is_none());
@@ -20,68 +24,84 @@ fn test_parse_args_no_args_url_is_empty() {
 /// Positional host argument → url is derived from the host.
 #[test]
 fn test_parse_args_positional_host_sets_url() {
-    let a = parse_args_from(args(&["myserver"]));
+    let a = parse_args(&["myserver"]);
     assert_eq!(a.url, "http://myserver:9091/transmission/rpc");
 }
 
 /// Positional host with explicit port.
 #[test]
 fn test_parse_args_positional_host_with_port_sets_url() {
-    let a = parse_args_from(args(&["myserver:8080"]));
+    let a = parse_args(&["myserver:8080"]);
     assert_eq!(a.url, "http://myserver:8080/transmission/rpc");
 }
 
 /// Positional full HTTP URL is passed through unchanged.
 #[test]
 fn test_parse_args_positional_full_url_passthrough() {
-    let a = parse_args_from(args(&["http://myserver/transmission/rpc"]));
+    let a = parse_args(&["http://myserver/transmission/rpc"]);
     assert_eq!(a.url, "http://myserver/transmission/rpc");
 }
 
 /// --url flag sets the url.
 #[test]
 fn test_parse_args_url_flag_sets_url() {
-    let a = parse_args_from(args(&["--url", "http://remotehost:9091/transmission/rpc"]));
+    let a = parse_args(&["--url", "http://remotehost:9091/transmission/rpc"]);
     assert_eq!(a.url, "http://remotehost:9091/transmission/rpc");
 }
 
 /// -u short flag also sets the url.
 #[test]
 fn test_parse_args_url_short_flag_sets_url() {
-    let a = parse_args_from(args(&["-u", "http://remotehost/transmission/rpc"]));
+    let a = parse_args(&["-u", "http://remotehost/transmission/rpc"]);
     assert_eq!(a.url, "http://remotehost/transmission/rpc");
 }
 
 /// --url flag takes precedence over a positional host.
 #[test]
 fn test_parse_args_url_flag_overrides_positional() {
-    let a = parse_args_from(args(&[
-        "somehost",
-        "--url",
-        "http://explicit/transmission/rpc",
-    ]));
+    let a = parse_args(&["somehost", "--url", "http://explicit/transmission/rpc"]);
     assert_eq!(a.url, "http://explicit/transmission/rpc");
 }
 
 #[test]
 fn test_parse_args_clear_auth_flag() {
-    let a = parse_args_from(args(&["--clear-auth"]));
+    let a = parse_args(&["--clear-auth"]);
     assert!(a.clear_auth);
     assert!(a.url.is_empty());
 }
 
 #[test]
 fn test_parse_args_clear_auth_with_host() {
-    let a = parse_args_from(args(&["myserver:9092", "--clear-auth"]));
+    let a = parse_args(&["myserver:9092", "--clear-auth"]);
     assert!(a.clear_auth);
     assert_eq!(a.url, "http://myserver:9092/transmission/rpc");
 }
 
 #[test]
 fn test_parse_args_flags_username_and_password() {
-    let a = parse_args_from(args(&["-n", "myuser", "-p", "mypass"]));
+    let a = parse_args(&["-n", "myuser", "-p", "mypass"]);
     assert_eq!(a.username.as_deref(), Some("myuser"));
     assert_eq!(a.password.as_deref(), Some("mypass"));
+}
+
+#[test]
+fn parse_args_rejects_missing_credential_values() {
+    for (option, following) in [
+        ("--username", None),
+        ("-n", Some("--password")),
+        ("--password", None),
+        ("-p", Some("--clear-auth")),
+    ] {
+        let mut input = vec![option.to_string()];
+        if let Some(next) = following {
+            input.push(next.to_string());
+        }
+        let error = parse_args_from(input.into_iter())
+            .err()
+            .expect("missing credential value should fail");
+        assert!(error.contains(option));
+        assert!(error.contains("requires a value"));
+    }
 }
 
 #[test]
@@ -108,13 +128,13 @@ fn empty_args() -> Args {
 
 #[test]
 fn parse_args_captures_credentials_and_https_urls() {
-    let parsed = parse_args_from(args(&[
+    let parsed = parse_args(&[
         "https://transmission.example/rpc",
         "--username",
         "alice",
         "--password",
         "secret",
-    ]));
+    ]);
 
     assert_eq!(parsed.url, "https://transmission.example/rpc");
     assert_eq!(parsed.username.as_deref(), Some("alice"));

@@ -19,10 +19,15 @@ struct Args {
 }
 
 fn parse_args() -> Args {
-    parse_args_from(std::env::args().skip(1))
+    parse_args_from(std::env::args().skip(1)).unwrap_or_else(|error| {
+        eprintln!("error: {error}");
+        std::process::exit(1);
+    })
 }
 
-fn parse_args_from<I>(iter: I) -> Args
+/// Parses command-line arguments, returning an actionable error when a
+/// credential option has no value.
+fn parse_args_from<I>(iter: I) -> Result<Args, String>
 where
     I: Iterator<Item = String>,
 {
@@ -42,9 +47,11 @@ where
                     std::process::exit(1);
                 });
             }
-            "-n" | "--username" => args.username = iter.next(),
+            "-n" | "--username" => {
+                args.username = Some(required_option_value(&mut iter, &arg)?);
+            }
             "-p" | "--password" => {
-                args.password = iter.next();
+                args.password = Some(required_option_value(&mut iter, &arg)?);
                 eprintln!(
                     "warning: passing password via -p is visible in process listings and shell history"
                 );
@@ -91,10 +98,29 @@ where
             };
             format!("http://{h}/transmission/rpc")
         };
-        // If neither --url nor a positional host was given, leave args.url empty so
-        // main() can fall back to config.connection.url before the hardcoded default.
     }
-    args
+    // If neither --url nor a positional host was given, leave args.url empty so
+    // main() can fall back to config.connection.url before the hardcoded default.
+    Ok(args)
+}
+
+/// Returns the next non-option argument required by a CLI option.
+fn required_option_value<I>(
+    iter: &mut std::iter::Peekable<I>,
+    option: &str,
+) -> Result<String, String>
+where
+    I: Iterator<Item = String>,
+{
+    match iter.peek() {
+        Some(value) if value.starts_with('-') => {
+            Err(format!("{option} requires a value, not {value:?}"))
+        }
+        Some(_) => iter
+            .next()
+            .ok_or_else(|| format!("{option} requires a value")),
+        None => Err(format!("{option} requires a value")),
+    }
 }
 
 /// Selects the keyring backend for this process.
