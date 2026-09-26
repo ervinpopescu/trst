@@ -28,6 +28,7 @@ pub trait AppHandlers {
     fn handle_filter_input(&mut self, key: KeyEvent);
 
     /// Handles keyboard events when typing credentials in the authentication modal.
+    /// Credentials are persisted only after a successful authentication request.
     fn handle_auth_input(&mut self, key: KeyEvent);
 
     /// Handles submit/completion for editing torrent labels.
@@ -517,17 +518,7 @@ impl AppHandlers for App {
                     _ => return,
                 };
                 self.client.set_auth(&username, &password);
-                let url = self.client.url.clone();
-                let cfg_path = crate::config::config_path();
-                std::thread::spawn(move || {
-                    persist_credentials_impl(
-                        &url,
-                        &username,
-                        &password,
-                        &cfg_path,
-                        credentials::save,
-                    );
-                });
+                self.pending_credentials_save = Some((username, password));
                 self.refresh_torrents();
             }
             KeyCode::Backspace => {

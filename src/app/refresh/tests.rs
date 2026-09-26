@@ -48,6 +48,18 @@ fn refresh_detail_missing_torrent_clears_file_state() {
 }
 
 #[test]
+fn test_drain_torrents_ok_persists_pending_credentials() {
+    let mut app = make_app();
+    app.pending_credentials_save = Some(("user".into(), "password".into()));
+    app.refresh_tx
+        .send(RefreshMsg::Torrents(Ok(vec![])))
+        .unwrap();
+    app.drain_results();
+
+    assert!(app.pending_credentials_save.is_none());
+}
+
+#[test]
 fn test_drain_torrents_ok_updates_list_and_clears_error() {
     let mut app = make_app();
     app.last_error = Some("stale error".into());
@@ -71,6 +83,60 @@ fn test_drain_torrents_ok_updates_list_and_clears_error() {
 
     assert_eq!(app.torrents.len(), 2);
     assert!(app.last_error.is_none(), "error must be cleared on success");
+}
+
+#[test]
+fn background_torrent_refresh_keeps_selection_and_cursor_by_torrent_id() {
+    let mut app = make_app();
+    app.sort_column = SortColumn::Name;
+    app.sort_ascending = true;
+    app.torrents = vec![
+        Torrent {
+            id: 10,
+            name: "Alpha".into(),
+            ..Default::default()
+        },
+        Torrent {
+            id: 20,
+            name: "Beta".into(),
+            ..Default::default()
+        },
+    ];
+    app.rebuild_filter();
+    app.selected.insert(0);
+    app.cursor = 1;
+
+    app.refresh_tx
+        .send(RefreshMsg::Torrents(Ok(vec![
+            Torrent {
+                id: 10,
+                name: "Zulu".into(),
+                ..Default::default()
+            },
+            Torrent {
+                id: 20,
+                name: "Alpha".into(),
+                ..Default::default()
+            },
+        ])))
+        .unwrap();
+    app.drain_results();
+
+    assert_eq!(app.target_ids(), vec![10]);
+    assert_eq!(app.cursor, 0);
+    assert_eq!(app.torrents[app.filtered_indices[app.cursor]].id, 20);
+}
+
+#[test]
+fn test_drain_torrents_403_discards_pending_credentials() {
+    let mut app = make_app();
+    app.pending_credentials_save = Some(("user".into(), "password".into()));
+    app.refresh_tx
+        .send(RefreshMsg::Torrents(Err("HTTP 403 Forbidden".into())))
+        .unwrap();
+    app.drain_results();
+
+    assert!(app.pending_credentials_save.is_none());
 }
 
 #[test]
@@ -318,6 +384,7 @@ fn test_drain_results_detail_401_opens_auth_modal() {
         Config::default(),
     );
     app.refresh_in_flight = true;
+    app.pending_credentials_save = Some(("alice".into(), "secret".into()));
     app.refresh_tx
         .send(RefreshMsg::Detail(Box::new(Err(
             "HTTP 401 Unauthorized".into()
@@ -326,6 +393,22 @@ fn test_drain_results_detail_401_opens_auth_modal() {
     app.drain_results();
     assert!(matches!(app.modal, Some(Modal::Auth { .. })));
     assert!(app.last_error.is_none());
+    assert!(app.pending_credentials_save.is_none());
+}
+
+#[test]
+fn event_snapshot_auth_failure_discards_pending_credentials() {
+    let mut app = make_app();
+    app.pending_credentials_save = Some(("alice".into(), "secret".into()));
+    app.refresh_tx
+        .send(RefreshMsg::EventSnapshot(Err("HTTP 403 Forbidden".into())))
+        .unwrap();
+
+    app.drain_results();
+
+    assert!(app.pending_credentials_save.is_none());
+    assert_eq!(app.last_error.as_deref(), Some("HTTP 403 Forbidden"));
+    assert!(!app.event_snapshot_in_flight);
 }
 
 #[test]
@@ -343,6 +426,30 @@ fn test_drain_results_success_clears_error_since() {
     app.drain_results();
     assert!(app.last_error.is_none());
     assert!(app.error_since.is_none());
+}
+
+#[test]
+fn refresh_torrents_discards_pending_credentials_on_403() {
+    let server = ScriptedServer::start(vec![Response::status(403, "Forbidden")]);
+    let mut app = app_for_server(&server);
+    app.pending_credentials_save = Some(("user".into(), "password".into()));
+
+    app.refresh_torrents();
+
+    assert!(app.pending_credentials_save.is_none());
+    server.request();
+}
+
+#[test]
+fn refresh_torrents_retains_pending_credentials_on_transient_error() {
+    let server = ScriptedServer::start(vec![Response::status(500, "Broken")]);
+    let mut app = app_for_server(&server);
+    app.pending_credentials_save = Some(("user".into(), "password".into()));
+
+    app.refresh_torrents();
+
+    assert!(app.pending_credentials_save.is_some());
+    server.request();
 }
 
 #[test]
@@ -374,6 +481,41 @@ fn refresh_torrents_sorts_filters_and_clears_stale_error() {
 }
 
 #[test]
+fn torrent_refresh_drops_selection_for_removed_torrents_and_clamps_cursor() {
+    let mut app = make_app();
+    app.sort_column = SortColumn::Name;
+    app.sort_ascending = true;
+    app.torrents = vec![
+        Torrent {
+            id: 10,
+            name: "Alpha".into(),
+            ..Default::default()
+        },
+        Torrent {
+            id: 20,
+            name: "Beta".into(),
+            ..Default::default()
+        },
+    ];
+    app.rebuild_filter();
+    app.selected.extend([0, 1]);
+    app.cursor = 1;
+
+    app.refresh_tx
+        .send(RefreshMsg::Torrents(Ok(vec![Torrent {
+            id: 10,
+            name: "Alpha".into(),
+            ..Default::default()
+        }])))
+        .unwrap();
+    app.drain_results();
+
+    assert_eq!(app.target_ids(), vec![10]);
+    assert_eq!(app.cursor, 0);
+    assert_eq!(app.torrents[app.filtered_indices[app.cursor]].id, 10);
+}
+
+#[test]
 fn synchronous_refreshes_surface_transport_errors() {
     let torrent_server = ScriptedServer::start(vec![Response::status(500, "Broken")]);
     let mut app = app_for_server(&torrent_server);
@@ -393,6 +535,40 @@ fn synchronous_refreshes_surface_transport_errors() {
     app.refresh_detail();
     assert_eq!(app.last_error.as_deref(), Some("HTTP 502 Bad Gateway"));
     detail_server.request();
+}
+
+#[test]
+fn synchronous_unauthorized_refresh_discards_pending_credentials() {
+    let server = ScriptedServer::start(vec![Response::status(401, "Unauthorized")]);
+    let mut app = app_for_server(&server);
+    app.pending_credentials_save = Some(("alice".into(), "secret".into()));
+
+    app.refresh_torrents();
+
+    assert!(app.pending_credentials_save.is_none());
+    assert!(matches!(app.modal, Some(Modal::Auth { .. })));
+    assert!(app.last_error.is_none());
+    server.request();
+}
+
+#[test]
+fn synchronous_detail_unauthorized_refresh_discards_pending_credentials() {
+    let server = ScriptedServer::start(vec![Response::status(401, "Unauthorized")]);
+    let mut app = app_for_server(&server);
+    app.detail_torrent = Some(Torrent {
+        id: 42,
+        ..Default::default()
+    });
+    app.pending_credentials_save = Some(("alice".into(), "secret".into()));
+
+    app.refresh_detail();
+
+    assert!(app.pending_credentials_save.is_none());
+    assert!(matches!(app.modal, Some(Modal::Auth { .. })));
+    assert!(app.last_error.is_none());
+    let request = server.request();
+    assert_eq!(request.method(), "torrent-get");
+    assert_eq!(request.arguments()["ids"], serde_json::json!([42]));
 }
 
 #[test]

@@ -253,6 +253,8 @@ pub struct App {
 
     /// Optional URL string to save to config upon first successful connection.
     pending_url_save: Option<String>,
+    /// Credentials entered in the auth modal, saved only after a successful request.
+    pending_credentials_save: Option<(String, String)>,
 
     /// SSH directory listing cache for location autocompletion: `(parent_dir, subdirs)`.
     pub location_dir_cache: Option<(String, Vec<String>)>,
@@ -307,6 +309,7 @@ impl App {
             refresh_rx,
             refresh_in_flight: false,
             pending_url_save: None,
+            pending_credentials_save: None,
             location_dir_cache: None,
             remote_dir_lister: util::list_remote_dirs,
         })
@@ -374,21 +377,25 @@ impl App {
     }
 }
 
+/// Persists credentials to the keyring, falling back to the config file when
+/// keyring storage fails; config write errors are returned to the caller.
 fn persist_credentials_impl<F>(
     url: &str,
     username: &str,
     password: &str,
     cfg_path: &std::path::PathBuf,
     save_fn: F,
-) where
+) -> Result<(), String>
+where
     F: FnOnce(&str, &str, &str) -> Result<(), String>,
 {
     if save_fn(url, username, password).is_err() {
         let mut cfg = crate::config::Config::load_from(cfg_path);
         cfg.connection.username = Some(username.to_string());
         cfg.connection.password = Some(password.to_string());
-        cfg.save_to(cfg_path);
+        cfg.save_to(cfg_path).map_err(|e| e.to_string())?;
     }
+    Ok(())
 }
 
 fn is_safe_relative_path(name: &str) -> bool {
