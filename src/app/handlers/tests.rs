@@ -1055,6 +1055,26 @@ fn test_auth_modal_enter_on_password_submits() {
 }
 
 #[test]
+fn auth_credentials_are_discarded_after_authentication_failure() {
+    let server = ScriptedServer::start(vec![crate::test_support::Response::status(
+        401,
+        "Unauthorized",
+    )]);
+    let mut app = app_for_server(&server);
+    app.modal = Some(Modal::Auth {
+        username: "mistyped-user".into(),
+        password: "mistyped-password".into(),
+        focused: AuthField::Password,
+    });
+
+    app.handle_auth_input(make_key(KeyCode::Enter, KeyModifiers::NONE));
+
+    server.request();
+    assert!(app.pending_credentials_save.is_none());
+    assert!(matches!(app.modal, Some(Modal::Auth { .. })));
+}
+
+#[test]
 fn test_auth_modal_down_advances_field() {
     let mut app = App::new(
         TransmissionClient::new("http://dummy", None, None),

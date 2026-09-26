@@ -1,8 +1,64 @@
 use super::*;
 
+fn is_auth_error(err: &str) -> bool {
+    err == "HTTP 401 Unauthorized" || err.starts_with("HTTP 401") || err.starts_with("HTTP 403")
+}
+
+fn persist_pending_credentials(app: &mut App) {
+    if let Some((username, password)) = app.pending_credentials_save.take() {
+        let url = app.client.url.clone();
+        let cfg_path = crate::config::config_path();
+        std::thread::spawn(move || {
+            if let Err(e) =
+                persist_credentials_impl(&url, &username, &password, &cfg_path, credentials::save)
+            {
+                eprintln!("warning: failed to persist credentials: {e}");
+            }
+        });
+    }
+}
+
+fn visible_torrent_ids(app: &App) -> Vec<i64> {
+    app.filtered_torrents()
+        .iter()
+        .map(|torrent| torrent.id)
+        .collect()
+}
+
+fn replace_torrent_list(app: &mut App, mut list: Vec<Torrent>) {
+    let (selected_ids, cursor_id) = {
+        let visible = app.filtered_torrents();
+        let selected_ids: Vec<i64> = app
+            .selected
+            .iter()
+            .filter_map(|&index| visible.get(index).map(|torrent| torrent.id))
+            .collect();
+        (
+            selected_ids,
+            visible.get(app.cursor).map(|torrent| torrent.id),
+        )
+    };
+    app.sort_torrents(&mut list);
+    app.torrents = list;
+    app.rebuild_filter();
+
+    let visible_ids = visible_torrent_ids(app);
+    app.selected = selected_ids
+        .into_iter()
+        .filter_map(|id| visible_ids.iter().position(|&visible_id| visible_id == id))
+        .collect();
+    if let Some(id) = cursor_id
+        && let Some(index) = visible_ids.iter().position(|&visible_id| visible_id == id)
+    {
+        app.cursor = index;
+    }
+    app.clamp_cursor();
+}
+
 /// Trait for background data fetching and state synchronization with the Transmission daemon.
 pub trait AppRefresh {
     /// Synchronously fetches and updates the list of torrents.
+    /// A successful response also persists credentials pending from the auth modal.
     fn refresh_torrents(&mut self);
 
     /// Synchronously fetches and updates details for the currently active detail torrent.
@@ -15,6 +71,7 @@ pub trait AppRefresh {
     fn trigger_event_snapshot(&mut self);
 
     /// Drains and applies pending background messages from the refresh channel.
+    /// Successful main torrent-list responses also persist credentials pending from the auth modal.
     fn drain_results(&mut self);
 
     /// Reloads rsync state files when the rsync view is active.
@@ -25,15 +82,18 @@ pub trait AppRefresh {
 impl AppRefresh for App {
     fn refresh_torrents(&mut self) {
         match self.client.get_torrents(TORRENT_LIST_FIELDS) {
-            Ok(mut list) => {
-                self.sort_torrents(&mut list);
-                self.torrents = list;
-                self.rebuild_filter();
-                self.clamp_cursor();
+            Ok(list) => {
+                replace_torrent_list(self, list);
                 self.last_error = None;
                 self.error_since = None;
+                persist_pending_credentials(self);
             }
-            Err(e) => self.set_error(e),
+            Err(e) => {
+                if is_auth_error(&e) {
+                    self.pending_credentials_save = None;
+                }
+                self.set_error(e);
+            }
         }
     }
 
@@ -52,7 +112,12 @@ impl AppRefresh for App {
                 self.file_selected.clear();
                 self.view = View::TorrentList;
             }
-            Err(e) => self.set_error(e),
+            Err(e) => {
+                if is_auth_error(&e) {
+                    self.pending_credentials_save = None;
+                }
+                self.set_error(e);
+            }
         }
     }
 
@@ -121,22 +186,27 @@ impl AppRefresh for App {
         while let Ok(msg) = self.refresh_rx.try_recv() {
             match msg {
                 RefreshMsg::Torrents(result) => match result {
-                    Ok(mut list) => {
-                        self.sort_torrents(&mut list);
-                        self.torrents = list;
-                        self.rebuild_filter();
-                        self.clamp_cursor();
+                    Ok(list) => {
+                        replace_torrent_list(self, list);
                         self.last_error = None;
                         self.error_since = None;
+                        persist_pending_credentials(self);
                         if let Some(url) = self.pending_url_save.take() {
                             let mut cfg = crate::config::Config::load();
                             cfg.connection.url = Some(url);
-                            cfg.save();
+                            if let Err(e) = cfg.save() {
+                                self.set_error(format!("failed to save config: {e}"));
+                            }
                         }
                         let torrents = self.torrents.clone();
                         self.process_event_snapshot(&torrents);
                     }
-                    Err(e) => self.set_error(e),
+                    Err(e) => {
+                        if is_auth_error(&e) {
+                            self.pending_credentials_save = None;
+                        }
+                        self.set_error(e);
+                    }
                 },
                 RefreshMsg::Detail(result) => match *result {
                     Ok(Some(t)) => {
@@ -147,13 +217,23 @@ impl AppRefresh for App {
                         self.detail_torrent = None;
                         self.view = View::TorrentList;
                     }
-                    Err(e) => self.set_error(e),
+                    Err(e) => {
+                        if is_auth_error(&e) {
+                            self.pending_credentials_save = None;
+                        }
+                        self.set_error(e);
+                    }
                 },
                 RefreshMsg::EventSnapshot(result) => {
                     self.event_snapshot_in_flight = false;
                     match result {
                         Ok(torrents) => self.process_event_snapshot(&torrents),
-                        Err(e) => self.set_error(e),
+                        Err(e) => {
+                            if is_auth_error(&e) {
+                                self.pending_credentials_save = None;
+                            }
+                            self.set_error(e);
+                        }
                     }
                 }
                 RefreshMsg::ActionComplete {

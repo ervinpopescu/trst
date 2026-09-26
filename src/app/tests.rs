@@ -172,10 +172,29 @@ fn test_persist_credentials_impl_config_fallback_on_save_error() {
         "secret",
         &cfg_path,
         |_, _, _| Err("simulated keyring failure".into()),
-    );
+    )
+    .unwrap();
     let cfg = crate::config::Config::load_from(&cfg_path);
     assert_eq!(cfg.connection.username.as_deref(), Some("alice"));
     assert_eq!(cfg.connection.password.as_deref(), Some("secret"));
+}
+
+#[test]
+fn test_persist_credentials_impl_reports_config_save_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    let parent_file = tmp.path().join("not-a-directory");
+    std::fs::write(&parent_file, "file").unwrap();
+    let cfg_path = parent_file.join("config.toml");
+
+    let result = persist_credentials_impl(
+        "http://test.invalid/rpc",
+        "alice",
+        "secret",
+        &cfg_path,
+        |_, _, _| Err("simulated keyring failure".into()),
+    );
+
+    assert!(result.is_err());
 }
 
 #[test]
@@ -188,7 +207,8 @@ fn test_persist_credentials_impl_no_config_write_on_save_ok() {
         "hunter2",
         &cfg_path,
         |_, _, _| Ok(()),
-    );
+    )
+    .unwrap();
     assert!(
         !cfg_path.exists(),
         "config must not be created when keyring save succeeds"
