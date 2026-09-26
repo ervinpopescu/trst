@@ -123,6 +123,20 @@ fn test_set_error_401_does_not_set_error_since() {
 }
 
 #[test]
+fn test_set_error_403_discards_pending_credentials() {
+    let mut app = App::new(
+        TransmissionClient::new("http://dummy", None, None),
+        Config::default(),
+    );
+    app.pending_credentials_save = Some(("alice".into(), "secret".into()));
+
+    app.set_error("HTTP 403 Forbidden");
+
+    assert!(app.pending_credentials_save.is_none());
+    assert_eq!(app.last_error.as_deref(), Some("HTTP 403 Forbidden"));
+}
+
+#[test]
 fn test_tick_autoclear_clears_after_expiry() {
     let mut app = App::new(
         TransmissionClient::new("http://dummy", None, None),
@@ -513,6 +527,97 @@ fn delete_files_from_disk_removes_safe_targets_and_reports_rejected_paths() {
     assert!(app.file_selected.is_empty());
 }
 
+#[cfg(unix)]
+#[test]
+fn delete_files_from_disk_succeeds_with_symlinked_download_directory() {
+    use std::os::unix::fs::symlink;
+
+    let dir = tempfile::tempdir().unwrap();
+    let real_downloads = dir.path().join("real-downloads");
+    let downloads = dir.path().join("downloads");
+    std::fs::create_dir(&real_downloads).unwrap();
+    std::fs::write(real_downloads.join("target.txt"), "remove me").unwrap();
+    symlink(&real_downloads, &downloads).unwrap();
+
+    let mut app = local_app();
+    app.detail_torrent = Some(Torrent {
+        id: 1,
+        download_dir: downloads.to_string_lossy().into_owned(),
+        files: vec![TorrentFile {
+            name: "target.txt".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    app.file_selected.insert(0);
+
+    app.delete_files_from_disk();
+
+    assert!(!real_downloads.join("target.txt").exists());
+    assert!(app.last_error.is_none());
+}
+
+#[cfg(unix)]
+#[test]
+fn delete_files_from_disk_rejects_symlinked_ancestor() {
+    use std::os::unix::fs::symlink;
+
+    let dir = tempfile::tempdir().unwrap();
+    let downloads = dir.path().join("downloads");
+    let outside = dir.path().join("outside");
+    std::fs::create_dir(&downloads).unwrap();
+    std::fs::create_dir(&outside).unwrap();
+    std::fs::write(outside.join("valuable.txt"), "must remain").unwrap();
+    symlink(&outside, downloads.join("subdir")).unwrap();
+
+    let mut app = local_app();
+    app.detail_torrent = Some(Torrent {
+        id: 1,
+        download_dir: downloads.to_string_lossy().into_owned(),
+        files: vec![TorrentFile {
+            name: "subdir/valuable.txt".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    app.file_selected.insert(0);
+
+    app.delete_files_from_disk();
+
+    assert!(outside.join("valuable.txt").exists());
+    assert!(app.last_error.is_some());
+}
+
+#[cfg(unix)]
+#[test]
+fn delete_files_from_disk_unlinks_final_symlink_without_touching_target() {
+    use std::os::unix::fs::symlink;
+
+    let dir = tempfile::tempdir().unwrap();
+    let downloads = dir.path().join("downloads");
+    let outside = dir.path().join("outside.txt");
+    std::fs::create_dir(&downloads).unwrap();
+    std::fs::write(&outside, "must remain").unwrap();
+    symlink(&outside, downloads.join("link.txt")).unwrap();
+
+    let mut app = local_app();
+    app.detail_torrent = Some(Torrent {
+        id: 1,
+        download_dir: downloads.to_string_lossy().into_owned(),
+        files: vec![TorrentFile {
+            name: "link.txt".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    app.file_selected.insert(0);
+
+    app.delete_files_from_disk();
+
+    assert!(!downloads.join("link.txt").exists());
+    assert_eq!(std::fs::read_to_string(outside).unwrap(), "must remain");
+}
+
 #[test]
 fn delete_files_from_disk_rejects_unknown_download_directory() {
     let mut app = local_app();
@@ -530,6 +635,196 @@ fn delete_files_from_disk_rejects_unknown_download_directory() {
         app.last_error.as_deref(),
         Some("unknown download directory")
     );
+}
+
+#[test]
+fn delete_files_from_disk_canonicalizes_download_directory_with_parent_component() {
+    let dir = tempfile::tempdir().unwrap();
+    let downloads = dir.path().join("downloads");
+    std::fs::create_dir(&downloads).unwrap();
+    std::fs::write(downloads.join("keep.txt"), "remove me").unwrap();
+    let parent_component_path = format!("{}/downloads/../downloads", dir.path().display());
+
+    let mut app = local_app();
+    app.detail_torrent = Some(Torrent {
+        id: 1,
+        download_dir: parent_component_path,
+        files: vec![TorrentFile {
+            name: "keep.txt".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    app.file_selected.insert(0);
+
+    app.delete_files_from_disk();
+
+    assert!(!downloads.join("keep.txt").exists());
+    assert!(app.last_error.is_none());
+    assert!(app.file_selected.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn delete_files_from_disk_rejects_invalid_relative_paths_directly() {
+    let dir = tempfile::tempdir().unwrap();
+    let downloads = dir.path().to_string_lossy().into_owned();
+
+    for file_name in ["../outside.txt", ""] {
+        let error = remove_torrent_file_without_symlink_ancestors(&downloads, file_name)
+            .expect_err("unsafe/empty relative paths must be rejected");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn delete_files_from_disk_requires_an_absolute_download_root() {
+    let error = remove_torrent_file_without_symlink_ancestors("relative/downloads", "file.txt")
+        .expect_err("relative download roots must be rejected");
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+}
+
+#[cfg(unix)]
+#[test]
+fn canonical_root_components_reject_noncanonical_parent_components() {
+    let error = canonical_root_components(std::path::Path::new("/tmp/../var"))
+        .expect_err("a root containing ParentDir must fail closed");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+}
+
+#[cfg(unix)]
+#[test]
+fn delete_files_from_disk_propagates_root_open_failure_without_deleting() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("keep.txt");
+    std::fs::write(&target, "keep me").unwrap();
+    let root = dir.path().to_string_lossy();
+
+    let error = remove_torrent_file_unix_with_root_opener(&root, "keep.txt", || {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "injected root-open failure",
+        ))
+    })
+    .expect_err("root-open failure must abort deletion");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+    assert_eq!(std::fs::read_to_string(target).unwrap(), "keep me");
+}
+
+#[test]
+fn delete_files_from_disk_reports_missing_download_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing_downloads = dir.path().join("not-created");
+
+    let mut app = local_app();
+    app.detail_torrent = Some(Torrent {
+        id: 1,
+        download_dir: missing_downloads.to_string_lossy().into_owned(),
+        files: vec![TorrentFile {
+            name: "file.txt".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    app.file_selected.insert(0);
+
+    app.delete_files_from_disk();
+
+    assert!(app.last_error.as_deref().is_some_and(|error| {
+        error.contains("file.txt") && !error.contains("unsafe path rejected")
+    }));
+    assert!(app.file_selected.is_empty());
+}
+
+#[test]
+fn delete_files_from_disk_does_not_unlink_directory_target() {
+    let dir = tempfile::tempdir().unwrap();
+    let downloads = dir.path().join("downloads");
+    std::fs::create_dir(&downloads).unwrap();
+    let target = downloads.join("nested");
+    std::fs::create_dir(&target).unwrap();
+
+    let mut app = local_app();
+    app.detail_torrent = Some(Torrent {
+        id: 1,
+        download_dir: downloads.to_string_lossy().into_owned(),
+        files: vec![TorrentFile {
+            name: "nested".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    app.file_selected.insert(0);
+
+    app.delete_files_from_disk();
+
+    assert!(target.is_dir());
+    assert!(app.last_error.as_deref().is_some_and(|error| {
+        error.contains("nested") && !error.contains("unsafe path rejected")
+    }));
+    assert!(app.file_selected.is_empty());
+}
+
+#[test]
+fn delete_files_from_disk_rejects_nul_byte_in_file_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let downloads = dir.path().join("downloads");
+    std::fs::create_dir(&downloads).unwrap();
+
+    let mut app = local_app();
+    app.detail_torrent = Some(Torrent {
+        id: 1,
+        download_dir: downloads.to_string_lossy().into_owned(),
+        files: vec![TorrentFile {
+            name: "bad\0name.txt".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    app.file_selected.insert(0);
+
+    app.delete_files_from_disk();
+
+    assert!(
+        app.last_error
+            .as_deref()
+            .is_some_and(|error| { error.contains("path contains NUL byte") })
+    );
+    assert!(app.file_selected.is_empty());
+}
+
+#[test]
+fn delete_files_from_disk_reports_non_directory_ancestor_without_deleting_outside() {
+    let dir = tempfile::tempdir().unwrap();
+    let downloads = dir.path().join("downloads");
+    std::fs::create_dir(&downloads).unwrap();
+    std::fs::write(downloads.join("not-a-directory"), "keep me").unwrap();
+
+    let mut app = local_app();
+    app.detail_torrent = Some(Torrent {
+        id: 1,
+        download_dir: downloads.to_string_lossy().into_owned(),
+        files: vec![TorrentFile {
+            name: "not-a-directory/child.txt".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    app.file_selected.insert(0);
+
+    app.delete_files_from_disk();
+
+    assert_eq!(
+        std::fs::read_to_string(downloads.join("not-a-directory")).unwrap(),
+        "keep me"
+    );
+    assert!(app.last_error.as_deref().is_some_and(|error| {
+        error.contains("not-a-directory/child.txt") && !error.contains("unsafe path rejected")
+    }));
+    assert!(app.file_selected.is_empty());
 }
 
 #[test]
