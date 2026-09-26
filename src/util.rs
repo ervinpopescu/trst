@@ -6,7 +6,7 @@ pub fn human_bytes(bytes: i64) -> String {
     let mut val = bytes as f64;
     for &unit in UNITS {
         if val.abs() < 1024.0 {
-            return if val.fract() < 0.05 {
+            return if val.fract().abs() < 0.05 {
                 format!("{val:.0} {unit}")
             } else {
                 format!("{val:.1} {unit}")
