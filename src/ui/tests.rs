@@ -247,6 +247,19 @@ fn test_draw_modal_auth_narrow_terminal_clamps_width() {
 }
 
 #[test]
+fn test_draw_auth_modal_clamps_to_small_terminal_height() {
+    use crate::app::AuthField;
+
+    for height in 1..=3 {
+        let mut term = Terminal::new(TestBackend::new(30, height)).unwrap();
+        term.draw(|f| {
+            super::draw_auth_modal(f, "alice", "secret", AuthField::Password, f.area());
+        })
+        .unwrap();
+    }
+}
+
+#[test]
 fn test_draw_label_editing() {
     let mut app = make_app();
     app.label_editing = true;

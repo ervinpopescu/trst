@@ -254,8 +254,9 @@ fn draw_auth_modal(f: &mut Frame, username: &str, password: &str, focused: AuthF
         .max(44)
         .min(area.width);
     let x = area.x + (area.width.saturating_sub(width)) / 2;
-    let y = area.y + area.height / 2 - 1;
-    let popup = Rect::new(x, y, width, 4);
+    let height = 4.min(area.height);
+    let y = area.y + area.height.saturating_sub(height) / 2;
+    let popup = Rect::new(x, y, width, height);
 
     f.render_widget(Clear, popup);
     f.render_widget(
