@@ -442,8 +442,13 @@ fn executable_script(dir: &std::path::Path, name: &str, body: &str) -> std::path
     use std::os::unix::fs::PermissionsExt;
 
     let path = dir.join(name);
-    std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut staged = tempfile::NamedTempFile::new_in(dir).unwrap();
+    std::io::Write::write_all(&mut staged, format!("#!/bin/sh\n{body}\n").as_bytes()).unwrap();
+    staged
+        .as_file()
+        .set_permissions(std::fs::Permissions::from_mode(0o755))
+        .unwrap();
+    staged.persist(&path).unwrap();
     path
 }
 
