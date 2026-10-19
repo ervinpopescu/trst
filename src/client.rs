@@ -1,9 +1,110 @@
 use base64::Engine as _;
 use serde_json::{Value, json};
+use std::fmt;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::protocol::*;
+use ureq::unversioned::transport::Connector;
+
+#[derive(Debug, Default)]
+struct InterruptedReadConnector;
+
+impl<In: ureq::unversioned::transport::Transport> ureq::unversioned::transport::Connector<In>
+    for InterruptedReadConnector
+{
+    type Out = InterruptedReadTransport<In>;
+
+    fn connect(
+        &self,
+        _details: &ureq::unversioned::transport::ConnectionDetails,
+        chained: Option<In>,
+    ) -> Result<Option<Self::Out>, ureq::Error> {
+        Ok(chained.map(InterruptedReadTransport::new))
+    }
+}
+
+struct InterruptedReadTransport<T> {
+    inner: T,
+}
+
+impl<T> fmt::Debug for InterruptedReadTransport<T>
+where
+    T: ureq::unversioned::transport::Transport,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("InterruptedReadTransport")
+            .field(&self.inner)
+            .finish()
+    }
+}
+
+impl<T: ureq::unversioned::transport::Transport> InterruptedReadTransport<T> {
+    fn new(inner: T) -> Self {
+        Self { inner }
+    }
+
+    fn await_input_with_clock<F>(
+        &mut self,
+        timeout: ureq::unversioned::transport::NextTimeout,
+        mut now: F,
+    ) -> Result<bool, ureq::Error>
+    where
+        F: FnMut() -> Instant,
+    {
+        let Some(budget) = timeout.not_zero() else {
+            return self.inner.await_input(timeout);
+        };
+        let deadline = now() + *budget;
+
+        loop {
+            let remaining = deadline.saturating_duration_since(now());
+            if remaining.is_zero() {
+                return Err(ureq::Error::Timeout(timeout.reason));
+            }
+            let attempt = ureq::unversioned::transport::NextTimeout {
+                after: remaining.into(),
+                reason: timeout.reason,
+            };
+            match self.inner.await_input(attempt) {
+                Err(ureq::Error::Io(error)) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                result => return result,
+            }
+        }
+    }
+}
+
+impl<T> ureq::unversioned::transport::Transport for InterruptedReadTransport<T>
+where
+    T: ureq::unversioned::transport::Transport,
+{
+    fn buffers(&mut self) -> &mut dyn ureq::unversioned::transport::Buffers {
+        self.inner.buffers()
+    }
+
+    fn transmit_output(
+        &mut self,
+        amount: usize,
+        timeout: ureq::unversioned::transport::NextTimeout,
+    ) -> Result<(), ureq::Error> {
+        self.inner.transmit_output(amount, timeout)
+    }
+
+    fn await_input(
+        &mut self,
+        timeout: ureq::unversioned::transport::NextTimeout,
+    ) -> Result<bool, ureq::Error> {
+        self.await_input_with_clock(timeout, Instant::now)
+    }
+
+    fn is_open(&mut self) -> bool {
+        self.inner.is_open()
+    }
+
+    fn is_tls(&self) -> bool {
+        self.inner.is_tls()
+    }
+}
 
 /// HTTP client wrapper for Transmission JSON-RPC protocol over HTTP/HTTPS.
 pub struct TransmissionClient {
@@ -17,12 +118,22 @@ impl TransmissionClient {
     /// Creates a new `TransmissionClient` targeting `url`, with optional HTTP Basic auth and connection timeout.
     pub fn new(url: &str, auth: Option<(&str, &str)>, timeout: Option<u64>) -> Self {
         let timeout = timeout.unwrap_or(10);
-        let agent: ureq::Agent = ureq::Agent::config_builder()
+        let config = ureq::Agent::config_builder()
             .timeout_connect(Some(Duration::from_secs(5)))
             .timeout_global(Some(Duration::from_secs(timeout)))
             .http_status_as_error(false)
-            .build()
-            .into();
+            .build();
+        // The pre-TLS adapter handles ureq Interrupted reads and never replays POST writes.
+        let connector = ()
+            .chain(ureq::unversioned::transport::ConnectProxyConnector::default())
+            .chain(ureq::unversioned::transport::TcpConnector::default())
+            .chain(InterruptedReadConnector)
+            .chain(ureq::unversioned::transport::RustlsConnector::default());
+        let agent = ureq::Agent::with_parts(
+            config,
+            connector,
+            ureq::unversioned::resolver::DefaultResolver::default(),
+        );
 
         let auth_header = auth.map(|(u, p)| {
             format!(
