@@ -1,8 +1,400 @@
 use super::*;
 use crate::test_support::{Response, ScriptedServer, success};
+use std::collections::VecDeque;
+use std::io;
+use std::time::{Duration, Instant};
+use ureq::unversioned::transport::{Buffers, LazyBuffers, NextTimeout, Transport};
+
+#[derive(Debug, Default)]
+struct InterruptFirstReadConnector;
+
+impl<In: Transport> ureq::unversioned::transport::Connector<In> for InterruptFirstReadConnector {
+    type Out = InterruptFirstReadTransport<In>;
+
+    fn connect(
+        &self,
+        _details: &ureq::unversioned::transport::ConnectionDetails,
+        chained: Option<In>,
+    ) -> Result<Option<Self::Out>, ureq::Error> {
+        Ok(chained.map(|inner| InterruptFirstReadTransport {
+            inner,
+            interrupted: false,
+        }))
+    }
+}
+
+#[derive(Debug)]
+struct InterruptFirstReadTransport<T> {
+    inner: T,
+    interrupted: bool,
+}
+
+impl<T: Transport> Transport for InterruptFirstReadTransport<T> {
+    fn buffers(&mut self) -> &mut dyn Buffers {
+        self.inner.buffers()
+    }
+
+    fn transmit_output(&mut self, amount: usize, timeout: NextTimeout) -> Result<(), ureq::Error> {
+        self.inner.transmit_output(amount, timeout)
+    }
+
+    fn await_input(&mut self, timeout: NextTimeout) -> Result<bool, ureq::Error> {
+        if !self.interrupted {
+            self.interrupted = true;
+            return Err(interrupted_error());
+        }
+        self.inner.await_input(timeout)
+    }
+
+    fn is_open(&mut self) -> bool {
+        self.inner.is_open()
+    }
+
+    fn is_tls(&self) -> bool {
+        self.inner.is_tls()
+    }
+}
+
+struct DiagnosticTransport {
+    state: &'static str,
+    buffers: LazyBuffers,
+}
+
+impl std::fmt::Debug for DiagnosticTransport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DiagnosticTransport")
+            .field("state", &self.state)
+            .finish()
+    }
+}
+
+impl Transport for DiagnosticTransport {
+    fn buffers(&mut self) -> &mut dyn Buffers {
+        &mut self.buffers
+    }
+
+    fn transmit_output(
+        &mut self,
+        _amount: usize,
+        _timeout: NextTimeout,
+    ) -> Result<(), ureq::Error> {
+        Ok(())
+    }
+
+    fn await_input(&mut self, _timeout: NextTimeout) -> Result<bool, ureq::Error> {
+        Ok(false)
+    }
+
+    fn is_open(&mut self) -> bool {
+        true
+    }
+
+    fn is_tls(&self) -> bool {
+        false
+    }
+}
+
+#[test]
+fn interrupted_read_transport_debug_includes_inner_diagnostics() {
+    let transport = InterruptedReadTransport::new(DiagnosticTransport {
+        state: "diagnostic-state-visible",
+        buffers: LazyBuffers::new(64, 64),
+    });
+
+    let debug = format!("{transport:?}");
+
+    assert!(debug.contains("diagnostic-state-visible"));
+}
 
 fn client(server: &ScriptedServer) -> TransmissionClient {
     TransmissionClient::new(&server.url, None, Some(2))
+}
+
+#[derive(Debug)]
+struct FakeTransport {
+    buffers: LazyBuffers,
+    outcomes: VecDeque<Result<bool, ureq::Error>>,
+    seen_timeouts: Vec<NextTimeout>,
+    seen_writes: Vec<(usize, NextTimeout)>,
+    open: bool,
+    tls: bool,
+}
+
+impl FakeTransport {
+    fn new(outcomes: Vec<Result<bool, ureq::Error>>) -> Self {
+        Self {
+            buffers: LazyBuffers::new(64, 64),
+            outcomes: outcomes.into(),
+            seen_timeouts: Vec::new(),
+            seen_writes: Vec::new(),
+            open: true,
+            tls: false,
+        }
+    }
+}
+
+impl Transport for FakeTransport {
+    fn buffers(&mut self) -> &mut dyn Buffers {
+        &mut self.buffers
+    }
+
+    fn transmit_output(&mut self, amount: usize, timeout: NextTimeout) -> Result<(), ureq::Error> {
+        self.seen_writes.push((amount, timeout));
+        Ok(())
+    }
+
+    fn await_input(&mut self, timeout: NextTimeout) -> Result<bool, ureq::Error> {
+        self.seen_timeouts.push(timeout);
+        match self
+            .outcomes
+            .pop_front()
+            .unwrap_or_else(|| Err(interrupted_error()))
+        {
+            Ok(progress) => {
+                if progress {
+                    self.buffers.input_append_buf()[0] = b'x';
+                    self.buffers.input_appended(1);
+                }
+                Ok(progress)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn is_open(&mut self) -> bool {
+        self.open
+    }
+
+    fn is_tls(&self) -> bool {
+        self.tls
+    }
+}
+
+fn interrupted_error() -> ureq::Error {
+    ureq::Error::Io(io::Error::new(io::ErrorKind::Interrupted, "interrupted"))
+}
+
+fn scripted_clock(values: impl IntoIterator<Item = Instant>) -> impl FnMut() -> Instant {
+    let mut values = values.into_iter();
+    move || values.next().expect("scripted clock exhausted")
+}
+
+#[test]
+fn tcp_rpc_retries_an_interrupted_response_read_without_replaying_post() {
+    let server = ScriptedServer::start(vec![success(json!({"torrentCount": 3}))]);
+    let config = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(2)))
+        .http_status_as_error(false)
+        .build();
+    let connector = ()
+        .chain(ureq::unversioned::transport::TcpConnector::default())
+        .chain(InterruptFirstReadConnector)
+        .chain(InterruptedReadConnector)
+        .chain(ureq::unversioned::transport::RustlsConnector::default());
+    let agent = ureq::Agent::with_parts(
+        config,
+        connector,
+        ureq::unversioned::resolver::DefaultResolver::default(),
+    );
+
+    let response = agent
+        .post(&server.url)
+        .send(r#"{"method":"session-stats"}"#)
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let request = server.request();
+    assert_eq!(request.method(), "session-stats");
+}
+
+#[test]
+fn interrupted_input_is_retried_without_changing_buffers() {
+    let base = Instant::now();
+    let mut transport =
+        InterruptedReadTransport::new(FakeTransport::new(vec![Err(interrupted_error()), Ok(true)]));
+
+    assert!(
+        transport
+            .await_input_with_clock(
+                NextTimeout {
+                    after: Duration::from_secs(1).into(),
+                    reason: ureq::Timeout::RecvResponse,
+                },
+                scripted_clock([
+                    base,
+                    base + Duration::from_millis(1),
+                    base + Duration::from_millis(2),
+                ]),
+            )
+            .unwrap()
+    );
+    assert_eq!(transport.buffers().input(), b"x");
+}
+
+#[test]
+fn zero_timeout_input_is_delegated_without_creating_a_retry_deadline() {
+    let timeout = NextTimeout {
+        after: ureq::unversioned::transport::time::Duration::NotHappening,
+        reason: ureq::Timeout::RecvBody,
+    };
+    let mut transport = InterruptedReadTransport::new(FakeTransport::new(vec![Ok(false)]));
+
+    assert!(
+        !transport
+            .await_input_with_clock(timeout, || panic!("zero timeout must not read clock"))
+            .unwrap()
+    );
+    assert_eq!(transport.inner.seen_timeouts, [timeout]);
+}
+
+#[test]
+fn adapter_delegates_transport_state_and_ordinary_input_results() {
+    let base = Instant::now();
+    let mut inner = FakeTransport::new(vec![Ok(true)]);
+    inner.open = false;
+    inner.tls = true;
+    let mut transport = InterruptedReadTransport::new(inner);
+
+    assert!(
+        transport
+            .await_input_with_clock(
+                NextTimeout {
+                    after: Duration::from_secs(1).into(),
+                    reason: ureq::Timeout::RecvResponse,
+                },
+                scripted_clock([base, base + Duration::from_millis(1)]),
+            )
+            .unwrap()
+    );
+    assert_eq!(transport.inner.seen_timeouts.len(), 1);
+    assert!(!transport.is_open());
+    assert!(transport.is_tls());
+}
+
+#[test]
+fn interrupted_input_uses_decreasing_remaining_budget() {
+    let base = Instant::now();
+    let mut transport = InterruptedReadTransport::new(FakeTransport::new(vec![
+        Err(interrupted_error()),
+        Err(interrupted_error()),
+        Ok(true),
+    ]));
+
+    transport
+        .await_input_with_clock(
+            NextTimeout {
+                after: Duration::from_millis(10).into(),
+                reason: ureq::Timeout::RecvResponse,
+            },
+            scripted_clock([
+                base,
+                base + Duration::from_millis(2),
+                base + Duration::from_millis(5),
+                base + Duration::from_millis(7),
+            ]),
+        )
+        .unwrap();
+
+    let seen: Vec<Duration> = transport
+        .inner
+        .seen_timeouts
+        .iter()
+        .map(|timeout| (*timeout.after).into())
+        .collect();
+    assert_eq!(
+        seen,
+        [
+            Duration::from_millis(8),
+            Duration::from_millis(5),
+            Duration::from_millis(3)
+        ]
+    );
+}
+
+#[test]
+fn interrupted_input_expiry_preserves_original_reason() {
+    let base = Instant::now();
+    let mut transport =
+        InterruptedReadTransport::new(FakeTransport::new(vec![Err(interrupted_error())]));
+
+    let error = transport
+        .await_input_with_clock(
+            NextTimeout {
+                after: Duration::from_millis(10).into(),
+                reason: ureq::Timeout::RecvBody,
+            },
+            scripted_clock([
+                base,
+                base + Duration::from_millis(4),
+                base + Duration::from_millis(10),
+            ]),
+        )
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        ureq::Error::Timeout(ureq::Timeout::RecvBody)
+    ));
+    assert_eq!(transport.inner.seen_timeouts.len(), 1);
+}
+
+#[test]
+fn non_interrupted_input_error_is_propagated() {
+    let base = Instant::now();
+    let mut transport = InterruptedReadTransport::new(FakeTransport::new(vec![Err(
+        ureq::Error::Io(io::Error::new(io::ErrorKind::ConnectionReset, "reset")),
+    )]));
+
+    let error = transport
+        .await_input_with_clock(
+            NextTimeout {
+                after: Duration::from_secs(1).into(),
+                reason: ureq::Timeout::RecvResponse,
+            },
+            scripted_clock([base, base + Duration::from_millis(1)]),
+        )
+        .unwrap_err();
+    assert!(
+        matches!(error, ureq::Error::Io(error) if error.kind() == io::ErrorKind::ConnectionReset)
+    );
+}
+
+#[test]
+fn interrupted_input_preserves_eof() {
+    let base = Instant::now();
+    let mut transport = InterruptedReadTransport::new(FakeTransport::new(vec![
+        Err(interrupted_error()),
+        Ok(false),
+    ]));
+
+    assert!(
+        !transport
+            .await_input_with_clock(
+                NextTimeout {
+                    after: Duration::from_secs(1).into(),
+                    reason: ureq::Timeout::RecvBody,
+                },
+                scripted_clock([
+                    base,
+                    base + Duration::from_millis(1),
+                    base + Duration::from_millis(2),
+                ]),
+            )
+            .unwrap()
+    );
+    assert!(transport.buffers().input().is_empty());
+}
+
+#[test]
+fn interrupted_input_does_not_change_write_behavior() {
+    let timeout = NextTimeout {
+        after: Duration::from_secs(1).into(),
+        reason: ureq::Timeout::SendBody,
+    };
+    let mut transport = InterruptedReadTransport::new(FakeTransport::new(Vec::new()));
+
+    transport.transmit_output(7, timeout).unwrap();
+
+    assert_eq!(transport.inner.seen_writes, [(7, timeout)]);
 }
 
 #[test]
