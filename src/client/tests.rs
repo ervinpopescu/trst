@@ -218,6 +218,7 @@ fn interrupted_input_is_retried_without_changing_buffers() {
                 NextTimeout {
                     after: Duration::from_secs(1).into(),
                     reason: ureq::Timeout::RecvResponse,
+                    ..Default::default()
                 },
                 scripted_clock([
                     base,
@@ -235,6 +236,7 @@ fn zero_timeout_input_is_delegated_without_creating_a_retry_deadline() {
     let timeout = NextTimeout {
         after: ureq::unversioned::transport::time::Duration::NotHappening,
         reason: ureq::Timeout::RecvBody,
+        ..Default::default()
     };
     let mut transport = InterruptedReadTransport::new(FakeTransport::new(vec![Ok(false)]));
 
@@ -260,6 +262,7 @@ fn adapter_delegates_transport_state_and_ordinary_input_results() {
                 NextTimeout {
                     after: Duration::from_secs(1).into(),
                     reason: ureq::Timeout::RecvResponse,
+                    ..Default::default()
                 },
                 scripted_clock([base, base + Duration::from_millis(1)]),
             )
@@ -284,6 +287,7 @@ fn interrupted_input_uses_decreasing_remaining_budget() {
             NextTimeout {
                 after: Duration::from_millis(10).into(),
                 reason: ureq::Timeout::RecvResponse,
+                ..Default::default()
             },
             scripted_clock([
                 base,
@@ -321,6 +325,7 @@ fn interrupted_input_expiry_preserves_original_reason() {
             NextTimeout {
                 after: Duration::from_millis(10).into(),
                 reason: ureq::Timeout::RecvBody,
+                ..Default::default()
             },
             scripted_clock([
                 base,
@@ -349,6 +354,7 @@ fn non_interrupted_input_error_is_propagated() {
             NextTimeout {
                 after: Duration::from_secs(1).into(),
                 reason: ureq::Timeout::RecvResponse,
+                ..Default::default()
             },
             scripted_clock([base, base + Duration::from_millis(1)]),
         )
@@ -372,6 +378,7 @@ fn interrupted_input_preserves_eof() {
                 NextTimeout {
                     after: Duration::from_secs(1).into(),
                     reason: ureq::Timeout::RecvBody,
+                    ..Default::default()
                 },
                 scripted_clock([
                     base,
@@ -389,6 +396,7 @@ fn interrupted_input_does_not_change_write_behavior() {
     let timeout = NextTimeout {
         after: Duration::from_secs(1).into(),
         reason: ureq::Timeout::SendBody,
+        ..Default::default()
     };
     let mut transport = InterruptedReadTransport::new(FakeTransport::new(Vec::new()));
 
