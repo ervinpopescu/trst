@@ -64,7 +64,7 @@ impl<T: ureq::unversioned::transport::Transport> InterruptedReadTransport<T> {
             }
             let attempt = ureq::unversioned::transport::NextTimeout {
                 after: remaining.into(),
-                reason: timeout.reason,
+                ..timeout
             };
             match self.inner.await_input(attempt) {
                 Err(ureq::Error::Io(error)) if error.kind() == std::io::ErrorKind::Interrupted => {}
